@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"connect-postgres","version":"1.0.0","type":"connector","sdk":"github.com/punk-one/iot-rule-plugin-sdk@v1.0.0","module":"github.com/punk-one/iot-rule-plugins/connectors/connect_postgres"}

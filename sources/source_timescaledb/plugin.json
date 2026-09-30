@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"source-timeseries-timescaledb","version":"1.0.0","type":"source","sdk":"github.com/punk-one/iot-rule-plugin-sdk@v1.0.0","module":"github.com/punk-one/iot-rule-plugins/sources/source_timescaledb"}

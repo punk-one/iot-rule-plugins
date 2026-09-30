@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: iot-rule-plugins
+      - uses: actions/checkout@v4
+        with:
+          repository: punk-one/iot-rule-plugin-sdk
+          ref: v1.0.0
+          path: iot-rule-plugin-sdk
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: |
+            iot-rule-plugins/**/go.sum
+            iot-rule-plugin-sdk/go.sum
+      - name: Repository contracts
+        working-directory: iot-rule-plugins
+        run: go test . && go vet .
+      - name: All independent modules
+        working-directory: iot-rule-plugins
+        run: ./scripts/test-plugins.sh
+      - name: Build release artifacts and SBOMs
+        working-directory: iot-rule-plugins
+        run: ./build-plugins.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins-unsigned
+          path: iot-rule-plugins/dist/plugins
+          if-no-files-found: error

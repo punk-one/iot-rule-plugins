@@ -1,0 +1,46 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: '**/go.sum'
+      - uses: sigstore/cosign-installer@v3
+      - name: Verify repository contracts
+        run: |
+          go test .
+          go vet .
+          ./scripts/test-plugins.sh
+      - name: Build and sign release artifacts
+        env:
+          PLUGIN_REQUIRE_SIGNATURE: '1'
+          PLUGIN_SIGNING_MODE: keyless
+        run: ./build-plugins.sh
+      - name: Package artifacts
+        run: |
+          archive="iot-rule-plugins-${GITHUB_REF_NAME}-linux-amd64.tar.gz"
+          tar -C dist -czf "$archive" plugins
+          sha256sum "$archive" > SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "iot-rule-plugins-${GITHUB_REF_NAME}-linux-amd64.tar.gz" \
+            SHA256SUMS \
+            --verify-tag \
+            --generate-notes \
+            --title "IoT Rule Plugins ${GITHUB_REF_NAME}"

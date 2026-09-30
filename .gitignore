@@ -1,0 +1,7 @@
+.gocache/
+dist/
+/fanuc_libs
+*.so
+*-latest
+/connectors/connect_tdengine/connect_tdengine
+/sinks/tdengine_sink/tdengine_sink

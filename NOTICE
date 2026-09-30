@@ -1,0 +1,6 @@
+IoT Rule Engine Official Plugins
+Copyright 2026 punk-one
+
+This product includes third-party Go modules. Exact module versions for each
+binary are recorded in its CycloneDX SBOM. Optional FANUC FOCAS headers and
+libraries are proprietary and are not distributed by this repository.
