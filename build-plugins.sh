@@ -146,8 +146,31 @@ main() {
     build_plugin "${entry}"
   done
 
-  "${MANIFEST_TOOL}" release "${RELEASE_RECORDS}" "${PLUGINS_DST_DIR}/release-manifest.json" "${REPO_ROOT}"
+  local release_manifest="${PLUGINS_DST_DIR}/release-manifest.json"
+  "${MANIFEST_TOOL}" release "${RELEASE_RECORDS}" "${release_manifest}" "${REPO_ROOT}"
+  sign_release_manifest "${release_manifest}"
   echo "plugin build completed: ${PLUGINS_DST_DIR}"
+}
+
+sign_release_manifest() {
+  local manifest_path="$1"
+  if [[ "${PLUGIN_SIGNING_MODE:-}" == "keyless" ]]; then
+    if ! command -v cosign >/dev/null 2>&1; then
+      echo "error: PLUGIN_SIGNING_MODE=keyless but cosign is unavailable" >&2
+      return 1
+    fi
+    cosign sign-blob --yes --bundle "${manifest_path}.sigstore.json" "${manifest_path}"
+  elif [[ -n "${PLUGIN_SIGNING_KEY:-}" ]]; then
+    if ! command -v cosign >/dev/null 2>&1; then
+      echo "error: PLUGIN_SIGNING_KEY is set but cosign is unavailable" >&2
+      return 1
+    fi
+    cosign sign-blob --yes --key "${PLUGIN_SIGNING_KEY}" \
+      --output-signature "${manifest_path}.sig" "${manifest_path}"
+  elif [[ "${PLUGIN_REQUIRE_SIGNATURE:-0}" == "1" ]]; then
+    echo "error: signed releases require a signature for release-manifest.json" >&2
+    return 1
+  fi
 }
 
 main "$@"
