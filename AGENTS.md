@@ -14,8 +14,8 @@ the stable sibling SDK and must not contain engine internals. Each plugin is ind
 - Plugins must not import another plugin or a shared repository implementation package. Put truly generic
   runtime contracts in the SDK; otherwise duplicate small protocol-local helpers within the plugin.
 - `fanucutil` is an optional standalone module and is not shared by official plugin modules.
-- All current official plugin manifests and `PluginInfo` versions are `1.0.0`.
-- Do not add local `replace` directives to plugin modules. Local SDK replacement belongs only in `go.work`.
+- Plugin manifests and PluginInfo carry independent semantic versions. New plugins start at 1.0.0; fixes increment the affected plugin's patch version. The SDK contract remains v1.0.0.
+- Do not add local replace directives or depend on go.work. Build every module with GOWORK=off against its pinned SDK tag.
 
 ## Process and instance model
 

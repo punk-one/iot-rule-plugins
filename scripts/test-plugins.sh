@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+export GOWORK=off
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -12,7 +13,7 @@ fi
 PLUGINS=(
   connectors/connect_mqtt connectors/connect_postgres connectors/connect_redis
   connectors/connect_s7 connectors/connect_tdengine connectors/connect_timescaledb
-  processors/detect_change processors/javascript_transform processors/process_status_event
+  processors/detect_change processors/buffer_node processors/javascript_transform processors/process_status_event
   processors/redis_relationship_mapping
   processors/transform processors/transform_map
   sinks/sink_mqtt sinks/sink_postgres sinks/sink_redis sinks/sink_s7 sinks/tdengine_sink sinks/timescaledb_sink

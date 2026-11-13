@@ -24,7 +24,7 @@ type pluginManifest struct {
 
 func TestPluginsAreIndependentModulesAndManifestsMatch(t *testing.T) {
 	root := repoSourceRoot(t)
-	manifestPaths := make([]string, 0, 23)
+	manifestPaths := make([]string, 0, 24)
 	for _, category := range []string{"connectors", "processors", "sinks", "sources"} {
 		matches, err := filepath.Glob(filepath.Join(root, category, "*", "plugin.json"))
 		if err != nil {
@@ -32,8 +32,8 @@ func TestPluginsAreIndependentModulesAndManifestsMatch(t *testing.T) {
 		}
 		manifestPaths = append(manifestPaths, matches...)
 	}
-	if len(manifestPaths) != 23 {
-		t.Fatalf("plugin manifests=%d, want 23", len(manifestPaths))
+	if len(manifestPaths) != 24 {
+		t.Fatalf("plugin manifests=%d, want 24", len(manifestPaths))
 	}
 
 	seen := make(map[string]string, len(manifestPaths))

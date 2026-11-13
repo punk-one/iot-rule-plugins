@@ -165,7 +165,7 @@ func TestMQTTSinkPublishesBufferAckAfterSuccessfulWrite(t *testing.T) {
 	sink := &MQTTSink{ctx: sinkMQTTRuntimeContextWithEmitter{connector: connector, emitter: emitter}}
 	if err := sink.validateConfig([]byte(`{
 		"connector_ref":"mqtt-1",
-		"target":{"topic":"rules/out"},
+		"target":{"topic":"rules/out","qos":1},
 		"options":{"write_timeout_sec":5}
 	}`)); err != nil {
 		t.Fatalf("validate config: %v", err)

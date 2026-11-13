@@ -23,7 +23,7 @@ func (s *MQTTSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-mqtt",
 		Name:        "MQTT Sink",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSink,
 		Description: "Publish rule events to MQTT through connector_ref",
 		Category:    "mqtt",

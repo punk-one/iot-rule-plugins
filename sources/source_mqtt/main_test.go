@@ -12,6 +12,7 @@ import (
 )
 
 type sourceTestConnector struct {
+	mu sync.Mutex
 	resp       sdk.ConnectorResponse
 	status     sdk.ResourceStatusEvent
 	reqs       []sdk.ConnectorRequest
@@ -33,9 +34,12 @@ func (c *sourceTestConnector) BatchWrite(req sdk.ConnectorRequest) (sdk.Connecto
 	return sdk.ConnectorResponse{}, nil
 }
 func (c *sourceTestConnector) OpenStream(req sdk.StreamOpenRequest) (sdk.StreamConsumer, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.streamReqs = append(c.streamReqs, req)
 	return c.stream, nil
 }
+func(c *sourceTestConnector) streamRequests()[]sdk.StreamOpenRequest{c.mu.Lock();defer c.mu.Unlock();return append([]sdk.StreamOpenRequest(nil),c.streamReqs...)}
 func (c *sourceTestConnector) CurrentStatus(resourceRef string) (sdk.ResourceStatusEvent, bool) {
 	return c.status, true
 }
@@ -419,24 +423,25 @@ func TestMQTTSourceOpenStreamUsesDeterministicSessionKey(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if len(connector.streamReqs) > 0 {
+		if len(connector.streamRequests()) > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if len(connector.streamReqs) != 1 {
-		t.Fatalf("expected one stream open request, got %d", len(connector.streamReqs))
+	reqs:=connector.streamRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected one stream open request, got %d", len(reqs))
 	}
-	if connector.streamReqs[0].SessionKey != "rule-1:source-node:mqtt-1" {
-		t.Fatalf("unexpected session key: %+v", connector.streamReqs[0])
+	if reqs[0].SessionKey != "rule-1:source-node:mqtt-1" {
+		t.Fatalf("unexpected session key: %+v", reqs[0])
 	}
-	if connector.streamReqs[0].InitialCredits != 32 ||
-		connector.streamReqs[0].MaxBufferedMessages != 2048 ||
-		connector.streamReqs[0].OverflowPolicy != "drop_oldest" ||
-		connector.streamReqs[0].AckTimeoutMS != 90000 ||
-		connector.streamReqs[0].MaxDeliverBatch != 16 {
-		t.Fatalf("unexpected stream options: %+v", connector.streamReqs[0])
+	if reqs[0].InitialCredits != 32 ||
+		reqs[0].MaxBufferedMessages != 2048 ||
+		reqs[0].OverflowPolicy != "drop_oldest" ||
+		reqs[0].AckTimeoutMS != 90000 ||
+		reqs[0].MaxDeliverBatch != 16 {
+		t.Fatalf("unexpected stream options: %+v", reqs[0])
 	}
 }
 

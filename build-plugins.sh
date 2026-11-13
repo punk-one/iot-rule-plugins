@@ -15,6 +15,7 @@ DEFAULT_PLUGINS=(
   "connectors/connect_tdengine"
   "connectors/connect_timescaledb"
   "processors/detect_change"
+  "processors/buffer_node"
   "processors/javascript_transform"
   "processors/process_status_event"
   "processors/redis_relationship_mapping"
@@ -45,7 +46,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(cd "${REPO_ROOT}" && go build -o "${MANIFEST_TOOL}" ./cmd/pluginmanifest)
+(cd "${REPO_ROOT}" && GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" GOWORK=off go build -o "${MANIFEST_TOOL}" ./cmd/pluginmanifest)
 
 build_plugin() {
   local entry="$1"
@@ -100,7 +101,7 @@ build_plugin() {
   mkdir -p "${output_dir}"
 
   echo "building ${entry} -> ${versioned_output}"
-  (cd "${plugin_dir}" && go build -trimpath -o "${versioned_output}" .)
+	(cd "${plugin_dir}" && GOWORK=off go build -trimpath -ldflags='-s -w' -o "${versioned_output}" .)
 
   chmod +x "${versioned_output}"
   ln -sfn "$(basename "${versioned_output}")" "${latest_output}"
@@ -128,10 +129,10 @@ build_plugin() {
 		echo "error: PLUGIN_REQUIRE_SIGNATURE=1 requires PLUGIN_SIGNING_MODE=keyless or PLUGIN_SIGNING_KEY" >&2
 		return 1
 	fi
-	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "${plugin_id}" "${version}" "${plugin_type}" "${sdk_version}" \
 		"${module_path}" "${category}/$(basename "${versioned_output}")" "${checksum}" \
-		"${category}/$(basename "${sbom_output}")" "${signature_record}" \
+		"${category}/$(basename "${sbom_output}")" "${signature_record}" "$(go env GOOS)" "$(go env GOARCH)" \
     >>"${RELEASE_RECORDS}"
 }
 

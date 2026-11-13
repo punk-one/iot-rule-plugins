@@ -7,6 +7,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GOWORK: off
+
 jobs:
   repository:
     runs-on: ubuntu-latest

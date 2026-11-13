@@ -1,0 +1,9 @@
+connectors/connect_mqtt
+connectors/connect_s7
+sources/source_mqtt
+sources/source_s7
+sinks/sink_mqtt
+sinks/sink_s7
+processors/javascript_transform
+processors/detect_change
+processors/buffer_node

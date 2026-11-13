@@ -1,15 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/google/uuid"
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
 )
 
@@ -24,6 +25,7 @@ type mqttResource struct {
 	client          mqtt.Client
 	lastConnectedAt time.Time
 	mu              sync.Mutex
+	connectMu       sync.Mutex
 	bindings        map[string]*mqttBinding
 	sessions        map[string]*mqttConsumerSession
 	subscriptions   map[string]*mqttSubscription
@@ -58,7 +60,7 @@ func (c *mqttConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-mqtt",
 		Name:        "Connector MQTT",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared MQTT connector for source and sink plugins",
 		Category:    "connector",
@@ -225,6 +227,8 @@ func (c *mqttConnector) getResource(providerHandle string) (*mqttResource, error
 }
 
 func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, error) {
+	resource.connectMu.Lock()
+	defer resource.connectMu.Unlock()
 	resource.mu.Lock()
 	if mqttClientReady(resource.client) && !resource.connectionExpired() {
 		client := resource.client
@@ -240,12 +244,7 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(resource.cfg.Broker)
-	clientID := resource.cfg.ClientID
-	if clientID == "" {
-		clientID = "punk-mqtt-connector"
-	}
-	clientID = clientID + "-" + uuid.New().String()[:6]
-	opts.SetClientID(clientID)
+	opts.SetClientID(stableClientID(resource))
 	opts.SetAutoReconnect(false)
 	opts.SetConnectRetry(false)
 	opts.SetConnectTimeout(time.Duration(resource.cfg.ConnectTimeoutSec) * time.Second)
@@ -277,6 +276,20 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 	resource.mu.Unlock()
 
 	return client, c.resubscribeAll(resource, client)
+}
+
+func stableClientID(resource *mqttResource) string {
+	if resource.cfg.ClientID != "" {
+		return resource.cfg.ClientID
+	}
+	namespace := os.Getenv("IOT_RULE_INSTANCE_ID")
+	if namespace == "" {
+		host, _ := os.Hostname()
+		cwd, _ := os.Getwd()
+		namespace = host + ":" + cwd + ":" + os.Getenv("IOT_RULE_DATA_DIR")
+	}
+	sum := sha256.Sum256([]byte(namespace + ":" + resource.resource.ID))
+	return fmt.Sprintf("iot-%x", sum[:10])
 }
 
 func (r *mqttResource) connectionExpired() bool {

@@ -31,7 +31,7 @@ func (m *MQTTSource) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-mqtt",
 		Name:        "MQTT Source",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Read MQTT messages through connector_ref and publish decoded MQTT payload as-is",
 		Type:        sdk.PluginTypeSource,
 		Category:    "mqtt",
@@ -62,9 +62,8 @@ func (m *MQTTSource) Start(ctx sdk.RuntimeContext) error {
 	if status, ok := ctx.Connector().CurrentStatus(m.cfg.ConnectorRef); ok {
 		m.onResourceStatus(status)
 	}
-	if err := m.openStream(); err != nil {
-		return err
-	}
+	// Resource availability must not prevent restoring a saved rule while the
+	// network is offline. consumeLoop opens the Stream with bounded backoff.
 	m.wg.Add(2)
 	go func() {
 		defer m.wg.Done()

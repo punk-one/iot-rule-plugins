@@ -26,6 +26,8 @@ type manifest struct {
 }
 
 type releaseRecord struct {
+	OS        string `json:"os,omitempty"`
+	Arch      string `json:"arch,omitempty"`
 	ID        string `json:"id"`
 	Version   string `json:"version"`
 	Type      string `json:"type"`
@@ -156,7 +158,7 @@ func release(recordsPath, outputPath, repoRoot string) error {
 	scanner := bufio.NewScanner(input)
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), "\t")
-		if len(fields) != 9 {
+		if len(fields) != 9 && len(fields) != 11 {
 			return fmt.Errorf("invalid release record %q", scanner.Text())
 		}
 		result.Plugins = append(result.Plugins, releaseRecord{
@@ -164,6 +166,10 @@ func release(recordsPath, outputPath, repoRoot string) error {
 			Module: fields[4], Artifact: fields[5], SHA256: fields[6],
 			SBOM: fields[7], Signature: fields[8],
 		})
+		if len(fields) == 11 {
+			result.Plugins[len(result.Plugins)-1].OS = fields[9]
+			result.Plugins[len(result.Plugins)-1].Arch = fields[10]
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return err

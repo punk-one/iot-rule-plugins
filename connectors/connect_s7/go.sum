@@ -30,6 +30,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/punk-one/gos7 v0.0.0-20251210090739-a8deeeeb454c h1:0KZYzL0Lc7oh4BspshboC+/YxlEH71Z7g37nZjUARfw=
 github.com/punk-one/gos7 v0.0.0-20251210090739-a8deeeeb454c/go.mod h1:L1k/Om5UjfaCcsV5lCE1aZ3MUvIRbbB9A53sBPXEEFo=
+github.com/punk-one/iot-rule-plugin-sdk v1.0.0 h1:O8aueVUVGzpkyJwpAqQMJE6NiUgBiAmWYm/BCOWqKI4=
+github.com/punk-one/iot-rule-plugin-sdk v1.0.0/go.mod h1:MNgDVV5i8xN40X93ACCTp97agA7wsFlOKPXf4h7Ih5E=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.7.2 h1:4jaiDzPyXQvSd7D0EjG45355tLlV3VOECpq10pLC+8s=
 github.com/stretchr/testify v1.7.2/go.mod h1:R6va5+xMeoiuVRoj+gSkQ7d3FALtqAAGI1FQKckRals=

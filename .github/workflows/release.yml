@@ -1,62 +1,67 @@
 name: release
-
 on:
   push:
-    tags:
-      - 'v*'
-
+    tags: ['v*']
 permissions:
   contents: write
   id-token: write
-
+env:
+  GOWORK: off
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --generate-notes
   plugins:
-    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version-file: go.mod
           cache-dependency-path: '**/go.sum'
       - uses: sigstore/cosign-installer@v3
-      - name: Verify repository contracts
-        run: |
-          go test .
-          go vet .
-          ./scripts/test-plugins.sh
-      - name: Build and sign release artifacts
+      - name: Test independent modules on the target CPU
+        run: go test . && go vet . && ./scripts/test-plugins.sh
+      - name: Build only the selected plugins
         env:
+          CGO_ENABLED: '0'
           PLUGIN_REQUIRE_SIGNATURE: '1'
           PLUGIN_SIGNING_MODE: keyless
-        run: ./build-plugins.sh
-      - name: Verify signed release contents
+        run: |
+          export PLUGINS_OVERRIDE="$(cat release-plugins.txt)"
+          ./build-plugins.sh
+          python3 scripts/package-plugins.py --sign
+      - name: Verify publisher identity for every artifact
         env:
           CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
-          CERTIFICATE_ISSUER: https://token.actions.githubusercontent.com
         run: |
-          set -euo pipefail
-          cosign verify-blob dist/plugins/release-manifest.json \
-            --bundle dist/plugins/release-manifest.json.sigstore.json \
-            --certificate-identity "$CERTIFICATE_IDENTITY" \
-            --certificate-oidc-issuer "$CERTIFICATE_ISSUER"
           find dist/plugins -type f -name '*.so' -print0 | while IFS= read -r -d '' artifact; do
-            cosign verify-blob "$artifact" \
-              --bundle "${artifact}.sigstore.json" \
+            cosign verify-blob "$artifact" --bundle "$artifact.sigstore.json" \
               --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer "$CERTIFICATE_ISSUER"
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
           done
-      - name: Package artifacts
-        run: |
-          archive="iot-rule-plugins-${GITHUB_REF_NAME}-linux-amd64.tar.gz"
-          tar -C dist -czf "$archive" plugins
-          sha256sum "$archive" > SHA256SUMS
-      - name: Publish GitHub Release
+      - name: Upload one archive per plugin, version and platform
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "iot-rule-plugins-${GITHUB_REF_NAME}-linux-amd64.tar.gz" \
-            SHA256SUMS \
-            --verify-tag \
-            --generate-notes \
-            --title "IoT Rule Plugins ${GITHUB_REF_NAME}"
+        run: gh release upload "$GITHUB_REF_NAME" dist/releases/*
+  publish:
+    needs: plugins
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

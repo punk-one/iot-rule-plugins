@@ -2,7 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-This repository contains the official `v1.0.0` plugin set for IoT Rule Engine. Every plugin is an
+This repository contains 24 official plugins for IoT Rule Engine, with independent semantic versions
+and the stable SDK v1.0.0 contract. Every plugin is an
 independent directory, Go module, dependency graph, manifest, and executable artifact.
 
 ## Design rules
@@ -33,10 +34,10 @@ to connector resources instead of duplicating credentials and physical session m
 
 ## Local development
 
-Clone the SDK as a sibling directory, then synchronize and verify every independent module:
+Build against the pinned published SDK tag and verify independent modules:
 
 ```bash
-./scripts/sync-modules.sh
+export GOWORK=off
 ./scripts/test-plugins.sh
 ./build-plugins.sh
 ```
@@ -49,8 +50,8 @@ go test -race .
 go vet .
 ```
 
-The repository `go.work` exists only for local development. Released plugin modules depend on the tagged
-SDK module and must not contain local `replace` directives.
+There is no go.work dependency. Plugin modules depend on the tagged SDK module
+and must not contain local `replace` directives.
 
 ## Release artifacts
 
@@ -62,6 +63,14 @@ SDK module and must not contain local `replace` directives.
 - Optional cosign signatures when `PLUGIN_SIGNING_KEY` is configured.
 
 Set `PLUGIN_REQUIRE_SIGNATURE=1` in a production release pipeline so an unsigned artifact fails the build.
+
+`release-plugins.txt` selects only the plugins needed for a release. Native AMD64
+and ARM64 jobs test modules separately and publish one archive per ID/version/CPU,
+including a signed manifest, SBOM and signature bundle. The engine downloads only
+the selected plugin. See [the release process](docs/release.md).
+
+The [persistent buffer](processors/buffer_node/README.md) provides bounded disk
+storage and sink-confirmed replay without changing SDK v1.0.0.
 
 ## Protocol lifecycle
 

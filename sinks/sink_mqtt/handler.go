@@ -27,6 +27,9 @@ type topicSegment struct {
 }
 
 func (s *MQTTSink) OnEvent(e sdk.Event) error {
+	if e.Metadata[bufferRecordIDMetadataKey] != "" && s.cfg.Target.QoS == 0 {
+		return mqttSinkSkippable(fmt.Errorf("persistent buffer requires MQTT QoS 1 or 2"))
+	}
 	if s.currentStatus() == sdk.ResourceStatusDisconnected || s.currentStatus() == sdk.ResourceStatusBlocked || s.currentStatus() == sdk.ResourceStatusReadonly {
 		return mqttSinkRetryable(fmt.Errorf("mqtt sink connector status is %s", s.currentStatus()))
 	}

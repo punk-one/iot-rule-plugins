@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-本仓库维护 IoT Rule Engine 的 23 个官方插件。每个插件都是独立目录、独立 Go
+本仓库维护 IoT Rule Engine 的 24 个官方插件，各自使用独立版本，SDK 保持 v1.0.0。每个插件都是独立目录、独立 Go
 module、独立依赖图和独立 `.so` 产物。插件之间禁止源码依赖；可复用的公共运行时
 能力只能进入 `iot-rule-plugin-sdk v1`。
 
@@ -13,7 +13,6 @@ module、独立依赖图和独立 `.so` 产物。插件之间禁止源码依赖�
 - `sources/<plugin>/`：事件源插件。
 - `sinks/<plugin>/`：事件输出插件。
 - `fanucutil/`：可选、独立且未被官方插件引用的 FANUC FOCAS 适配模块。
-- `go.work`：仅用于本仓库本地联调，不进入任何插件依赖。
 - `build-plugins.sh`：验证 manifest 后分别构建独立 `.so`、SHA-256、CycloneDX SBOM 和发布清单。
 
 ## 进程模型
@@ -29,10 +28,10 @@ Connector 本身已经在单进程中按 `provider_handle` 管理多个资源，
 
 ## 本地开发
 
-仓库自己的 `go.work` 将 23 个插件 module 与同级本地 SDK 关联：
+各仓库和 module 独立构建，直接使用已发布的 SDK 标签，不依赖 go.work 或本地 replace：
 
 ```bash
-./scripts/sync-modules.sh
+export GOWORK=off
 ./scripts/test-plugins.sh
 ./build-plugins.sh
 ```
@@ -53,6 +52,10 @@ manifest 与 `PluginInfo`、module 路径和入口模式由仓库测试统一校
 `dist/plugins/release-manifest.json` 记录 commit、Go 版本、SDK 版本、artifact、SHA-256、
 SBOM 和可选签名。配置 `PLUGIN_SIGNING_KEY` 后使用 `cosign sign-blob` 生成 `.sig`；
 设置 `PLUGIN_REQUIRE_SIGNATURE=1` 可让缺少签名直接导致构建失败。
+
+`release-plugins.txt` 选择本次需要发布的插件，原生 AMD64/ARM64 分别验收。
+每个 ID/版本/平台生成独立包，Engine 安装时仅下载所选插件。
+新增 [buffer-node](processors/buffer_node/README.md) 实现有界持久缓冲和指定 Sink 确认重放。
 
 - SDK v1 接入：[`docs/sdk-v1-integration.md`](docs/sdk-v1-integration.md)
 - 发布流程：[`docs/release.md`](docs/release.md)
