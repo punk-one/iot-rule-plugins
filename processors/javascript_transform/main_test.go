@@ -173,7 +173,9 @@ func TestThrowingGetterReturnsErrorWithoutPanic(t *testing.T) {
 
 func TestOversizedJavaScriptOutputIsRejected(t *testing.T) {
 	p := &JavaScriptTransformProcessor{}
-	if err := p.Init(sdk.PluginConfig{Raw: []byte(`{"timeout_ms":100,"code":"function main(input) { return { payload: { value: 'x'.repeat(1100000) } }; }"}`)}); err != nil {
+	// Test the size guard independently of runner speed. Timeout enforcement has
+	// its own small-budget infinite-loop test above.
+	if err := p.Init(sdk.PluginConfig{Raw: []byte(`{"timeout_ms":1000,"code":"function main(input) { return { payload: { value: 'x'.repeat(1100000) } }; }"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Start(testContext{emitter: &testEmitter{}}); err != nil {
