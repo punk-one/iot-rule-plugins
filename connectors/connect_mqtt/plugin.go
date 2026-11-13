@@ -17,6 +17,8 @@ import (
 type mqttConnector struct {
 	mu        sync.Mutex
 	resources map[string]*mqttResource
+	closed    bool
+	newClient func(*mqtt.ClientOptions) mqtt.Client
 }
 
 type mqttResource struct {
@@ -26,6 +28,7 @@ type mqttResource struct {
 	lastConnectedAt time.Time
 	mu              sync.Mutex
 	connectMu       sync.Mutex
+	closed          bool
 	bindings        map[string]*mqttBinding
 	sessions        map[string]*mqttConsumerSession
 	subscriptions   map[string]*mqttSubscription
@@ -53,6 +56,7 @@ type mqttInboundMessage struct {
 func NewConnector() sdk.ConnectorPlugin {
 	return &mqttConnector{
 		resources: make(map[string]*mqttResource),
+		newClient: mqtt.NewClient,
 	}
 }
 
@@ -60,7 +64,7 @@ func (c *mqttConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-mqtt",
 		Name:        "Connector MQTT",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared MQTT connector for source and sink plugins",
 		Category:    "connector",
@@ -87,11 +91,11 @@ func (c *mqttConnector) CreateResource(resource sdk.ConnectorResource) (string, 
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if current, ok := c.resources[handle]; ok && current.client != nil {
-		current.client.Disconnect(250)
+	if c.closed {
+		c.mu.Unlock()
+		return "", fmt.Errorf("connector stopped")
 	}
+	current := c.resources[handle]
 	c.resources[handle] = &mqttResource{
 		resource:      resource,
 		cfg:           cfg,
@@ -99,28 +103,21 @@ func (c *mqttConnector) CreateResource(resource sdk.ConnectorResource) (string, 
 		sessions:      make(map[string]*mqttConsumerSession),
 		subscriptions: make(map[string]*mqttSubscription),
 	}
+	c.mu.Unlock()
+	if current != nil {
+		closeMQTTResource(current)
+	}
 	return handle, nil
 }
 
 func (c *mqttConnector) DestroyResource(providerHandle string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	resource, ok := c.resources[providerHandle]
-	if !ok {
-		return nil
-	}
-	resource.mu.Lock()
-	if resource.client != nil {
-		resource.client.Disconnect(250)
-		resource.client = nil
-		resource.lastConnectedAt = time.Time{}
-	}
-	for _, session := range resource.sessions {
-		session.close()
-	}
-	resource.mu.Unlock()
 	delete(c.resources, providerHandle)
+	c.mu.Unlock()
+	if ok {
+		closeMQTTResource(resource)
+	}
 	return nil
 }
 
@@ -199,21 +196,38 @@ func (c *mqttConnector) CloseStream(providerHandle string, req sdk.StreamCloseRe
 
 func (c *mqttConnector) Stop() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	for id, resource := range c.resources {
-		resource.mu.Lock()
-		if resource.client != nil {
-			resource.client.Disconnect(250)
-			resource.client = nil
-			resource.lastConnectedAt = time.Time{}
-		}
-		for _, session := range resource.sessions {
-			session.close()
-		}
-		resource.mu.Unlock()
-		delete(c.resources, id)
+	c.closed = true
+	resources := c.resources
+	c.resources = make(map[string]*mqttResource)
+	c.mu.Unlock()
+	for _, resource := range resources {
+		closeMQTTResource(resource)
 	}
 	return nil
+}
+
+func closeMQTTResource(resource *mqttResource) {
+	// Retire first so an in-flight dial cannot publish a new physical session.
+	resource.mu.Lock()
+	resource.closed = true
+	resource.mu.Unlock()
+	resource.connectMu.Lock()
+	defer resource.connectMu.Unlock()
+	resource.mu.Lock()
+	client := resource.client
+	resource.client = nil
+	resource.lastConnectedAt = time.Time{}
+	sessions := make([]*mqttConsumerSession, 0, len(resource.sessions))
+	for _, session := range resource.sessions {
+		sessions = append(sessions, session)
+	}
+	resource.mu.Unlock()
+	for _, session := range sessions {
+		session.close()
+	}
+	if client != nil {
+		client.Disconnect(250)
+	}
 }
 
 func (c *mqttConnector) getResource(providerHandle string) (*mqttResource, error) {
@@ -230,6 +244,10 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 	resource.connectMu.Lock()
 	defer resource.connectMu.Unlock()
 	resource.mu.Lock()
+	if resource.closed {
+		resource.mu.Unlock()
+		return nil, fmt.Errorf("resource stopped")
+	}
 	if mqttClientReady(resource.client) && !resource.connectionExpired() {
 		client := resource.client
 		resource.mu.Unlock()
@@ -264,13 +282,22 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 		_ = c.resubscribeAll(resource, client)
 	})
 
-	client := mqtt.NewClient(opts)
+	newClient := c.newClient
+	if newClient == nil {
+		newClient = mqtt.NewClient
+	}
+	client := newClient(opts)
 	token := client.Connect()
 	if token.Wait() && token.Error() != nil {
 		return nil, token.Error()
 	}
 
 	resource.mu.Lock()
+	if resource.closed {
+		resource.mu.Unlock()
+		client.Disconnect(0)
+		return nil, fmt.Errorf("resource stopped while connecting")
+	}
 	resource.client = client
 	resource.lastConnectedAt = time.Now()
 	resource.mu.Unlock()
