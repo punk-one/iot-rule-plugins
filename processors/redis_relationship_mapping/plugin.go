@@ -18,7 +18,7 @@ func (p *RedisRelationshipMappingProcessor) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "redis-relationship-mapping",
 		Name:        "Redis Relationship Mapping",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Enrich event fields from generic relationship tables stored in Redis Hashes",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "transform",

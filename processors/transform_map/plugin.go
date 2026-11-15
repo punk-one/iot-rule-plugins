@@ -146,7 +146,7 @@ func (p *TransformMapPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "transform-map",
 		Name:        "Transform Map",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Render row payloads with Go templates and optional field expansion",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "transform",

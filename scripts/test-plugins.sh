@@ -10,15 +10,17 @@ if [[ "${PLUGIN_RACE:-1}" == "1" ]]; then
   RACE_FLAG=(-race)
 fi
 
-PLUGINS=(
-  connectors/connect_mqtt connectors/connect_postgres connectors/connect_redis
-  connectors/connect_s7 connectors/connect_tdengine connectors/connect_timescaledb
-  processors/detect_change processors/buffer_node processors/javascript_transform processors/process_status_event
-  processors/redis_relationship_mapping
-  processors/transform processors/transform_map
-  sinks/sink_mqtt sinks/sink_postgres sinks/sink_redis sinks/sink_s7 sinks/tdengine_sink sinks/timescaledb_sink
-  sources/source_mqtt sources/source_postgres sources/source_redis sources/source_s7 sources/source_timescaledb
-)
+PLUGINS=()
+for category in connectors sources processors sinks; do
+  for manifest in "${REPO_ROOT}/${category}"/*/plugin.json; do
+    [[ -f "${manifest}" ]] || continue
+    entry="${category}/$(basename "$(dirname "${manifest}")")"
+    # The native connector has its own explicit host/ABI test below.
+    [[ "${entry}" == "connectors/connect_fanuc" ]] && continue
+    PLUGINS+=("${entry}")
+  done
+done
+echo "Discovered ${#PLUGINS[@]} ordinary plugin modules"
 
 for entry in "${PLUGINS[@]}"; do
   echo "testing ${entry}"
@@ -34,3 +36,8 @@ done
 
 echo "testing optional fanuc stub"
 (cd "${REPO_ROOT}/fanucutil" && GOWORK=off go test "${RACE_FLAG[@]}" . && GOWORK=off go vet .)
+
+if [[ "$(go env GOOS)" == "linux" && "$(go env CGO_ENABLED)" == "1" && ( "$(go env GOARCH)" == "amd64" || "$(go env GOARCH)" == "arm" ) ]]; then
+  echo 'testing optional native FANUC connector with synthetic ABI fixture'
+  (cd "${REPO_ROOT}/connectors/connect_fanuc" && GOWORK=off go test "${RACE_FLAG[@]}" . && GOWORK=off go vet .)
+fi

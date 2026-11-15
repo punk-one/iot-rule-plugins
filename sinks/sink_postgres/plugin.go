@@ -31,7 +31,7 @@ func (p *PostgresSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-relational-postgres",
 		Name:        "Sink Relational PostgreSQL",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Write row payloads to PostgreSQL through connector_ref",
 		Type:        sdk.PluginTypeSink,
 		Category:    "storage",

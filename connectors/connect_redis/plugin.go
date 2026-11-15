@@ -147,7 +147,7 @@ func (c *redisConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-redis",
 		Name:        "Connector Redis",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared Redis connector for stream and hash-based source/sink plugins",
 		Category:    "connector",

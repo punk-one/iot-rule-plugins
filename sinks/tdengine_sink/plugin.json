@@ -1,1 +1,14 @@
-{"schema_version":1,"id":"sink-timeseries-tdengine","version":"1.0.0","type":"sink","sdk":"github.com/punk-one/iot-rule-plugin-sdk@v1.0.0","module":"github.com/punk-one/iot-rule-plugins/sinks/tdengine_sink"}
+{
+  "schema_version": 1,
+  "id": "sink-timeseries-tdengine",
+  "version": "1.0.1",
+  "type": "sink",
+  "sdk": "github.com/punk-one/iot-rule-plugin-sdk@v1.0.0",
+  "module": "github.com/punk-one/iot-rule-plugins/sinks/tdengine_sink",
+  "requirements": {
+    "schema_version": 1,
+    "connector_families": [
+      "tdengine"
+    ]
+  }
+}

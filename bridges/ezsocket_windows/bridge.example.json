@@ -1,0 +1,21 @@
+{
+  "listen": "127.0.0.1:19080",
+  "timeout_ms": 5000,
+  "devices": {
+    "machine-001": {
+      "progid": "REPLACE.WITH.VERIFIED.VENDOR.PROGID",
+      "open_method": "Open",
+      "open_arguments": [
+        "192.0.2.10",
+        0,
+        0
+      ],
+      "points": {
+        "state": {
+          "method": "GetVerifiedState",
+          "arguments": []
+        }
+      }
+    }
+  }
+}

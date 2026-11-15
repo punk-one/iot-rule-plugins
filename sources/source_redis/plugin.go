@@ -31,7 +31,7 @@ func (s *RedisSource) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-redis",
 		Name:        "Redis Source",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSource,
 		Description: "Consume Redis Stream messages through connector_ref and emit decoded events",
 		Category:    "redis",

@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "required": ["host", "from", "recipient_domains"], "properties": {"host": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 587}, "security": {"enum": ["starttls", "tls", "none"], "default": "starttls"}, "username": {"type": "string"}, "password": {"type": "string", "format": "password"}, "from": {"type": "string", "minLength": 1}, "recipient_domains": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1}}, "timeout_ms": {"type": "integer", "minimum": 100, "maximum": 30000, "default": 5000}}, "additionalProperties": false}`

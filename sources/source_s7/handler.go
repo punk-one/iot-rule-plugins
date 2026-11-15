@@ -30,6 +30,10 @@ type sourceReadResponse struct {
 }
 
 func (s *S7Source) pollLoop() {
+	if s.cfg.ScanMode == "coordinated" {
+		s.coordinatedLoop()
+		return
+	}
 	backoff := 0
 	nextDue := time.Now().Add(s.nextDelay(backoff))
 	var lastStartedAt time.Time
@@ -118,6 +122,9 @@ func (s *S7Source) poll() (bool, error) {
 	if err != nil {
 		return false, s7SourceRetryable(err)
 	}
+	return s.processScanResponse(resp)
+}
+func (s *S7Source) processScanResponse(resp sdk.ConnectorResponse) (bool, error) {
 	if s.stopped.Load() {
 		return resp.Congested, nil
 	}
@@ -129,6 +136,7 @@ func (s *S7Source) poll() (bool, error) {
 
 	values := make(map[string]interface{}, len(s.cfg.Points))
 	quality := make(map[string]string)
+	canonicalQuality := make(map[string]string, len(s.cfg.Points))
 	for _, point := range s.cfg.Points {
 		if s.stopped.Load() {
 			return resp.Congested, nil
@@ -141,9 +149,21 @@ func (s *S7Source) poll() (bool, error) {
 		if err != nil {
 			return resp.Congested, err
 		}
+		canonicalQuality[point.Name] = "good"
 		if status != "" {
 			quality[point.Name] = status
+			switch status {
+			case "defaulted":
+				canonicalQuality[point.Name] = "bad:range_default"
+			case "clamped":
+				canonicalQuality[point.Name] = "bad:range_clamped"
+			case "dropped":
+				canonicalQuality[point.Name] = "bad:range_dropped"
+			default:
+				canonicalQuality[point.Name] = "bad:" + status
+			}
 		}
+
 		if keep {
 			values[point.Name] = value
 		}
@@ -153,6 +173,7 @@ func (s *S7Source) poll() (bool, error) {
 		"time":        time.Now().UnixMilli(),
 		"device_code": s.cfg.Output.DeviceCode,
 		"data":        values,
+		"quality":     canonicalQuality,
 	}
 	if s.cfg.Output.IncludeMeta {
 		eventPayload["resource_status"] = string(s.currentStatus())
@@ -264,44 +285,89 @@ func applyPointPolicy(value interface{}, point PointDef) (interface{}, bool, str
 			return nil, false, "", fmt.Errorf("point %s scale requires a numeric value", point.Name)
 		}
 		transformed = number * *point.Scale
+		if _, ok = finiteNumber(transformed); !ok {
+			return nil, false, "", fmt.Errorf("point %s scaled value is not finite", point.Name)
+		}
+	}
+	if point.Offset != 0 {
+		number, ok := finiteNumber(transformed)
+		if !ok {
+			return nil, false, "", fmt.Errorf("point %s offset requires numeric input", point.Name)
+		}
+		transformed = number + point.Offset
+		if _, ok = finiteNumber(transformed); !ok {
+			return nil, false, "", fmt.Errorf("point %s offset result is not finite", point.Name)
+		}
+	}
+	quality := ""
+	// Range classification uses the unrounded engineering value. Otherwise
+	// 10.04 with precision=1 and maximum=10 would silently become a good 10.0.
+	if point.Range != nil {
+		number, ok := finiteNumber(transformed)
+		if !ok {
+			return nil, false, "", fmt.Errorf("point %s range requires a numeric value", point.Name)
+		}
+		below := point.Range.Minimum != nil && number < *point.Range.Minimum
+		above := point.Range.Maximum != nil && number > *point.Range.Maximum
+		if below || above {
+			switch point.Range.Policy {
+			case rangePolicyUseDefault:
+				transformed = point.Range.DefaultValue
+				quality = "defaulted"
+			case rangePolicyClamp:
+				if below {
+					transformed = *point.Range.Minimum
+				} else {
+					transformed = *point.Range.Maximum
+				}
+				quality = "clamped"
+			case rangePolicyDrop:
+				return nil, false, "dropped", nil
+			case rangePolicyError:
+				return nil, false, "", fmt.Errorf("point %s value %v is outside configured range", point.Name, transformed)
+			default:
+				return nil, false, "", fmt.Errorf("point %s has unsupported range policy %q", point.Name, point.Range.Policy)
+			}
+		}
 	}
 	if point.Precision != nil {
 		number, ok := finiteNumber(transformed)
 		if !ok {
 			return nil, false, "", fmt.Errorf("point %s precision requires a numeric value", point.Name)
 		}
-		multiplier := math.Pow10(*point.Precision)
-		transformed = math.Round(number*multiplier) / multiplier
-	}
-	if point.Range == nil {
-		return transformed, true, "", nil
-	}
-
-	number, ok := finiteNumber(transformed)
-	if !ok {
-		return nil, false, "", fmt.Errorf("point %s range requires a numeric value", point.Name)
-	}
-	below := point.Range.Minimum != nil && number < *point.Range.Minimum
-	above := point.Range.Maximum != nil && number > *point.Range.Maximum
-	if !below && !above {
-		return transformed, true, "", nil
-	}
-
-	switch point.Range.Policy {
-	case rangePolicyUseDefault:
-		return point.Range.DefaultValue, true, "defaulted", nil
-	case rangePolicyClamp:
-		if below {
-			return *point.Range.Minimum, true, "clamped", nil
+		rounded, err := roundEngineering(number, *point.Precision)
+		if err != nil {
+			return nil, false, "", fmt.Errorf("point %s: %w", point.Name, err)
 		}
-		return *point.Range.Maximum, true, "clamped", nil
-	case rangePolicyDrop:
-		return nil, false, "dropped", nil
-	case rangePolicyError:
-		return nil, false, "", fmt.Errorf("point %s value %v is outside configured range", point.Name, transformed)
-	default:
-		return nil, false, "", fmt.Errorf("point %s has unsupported range policy %q", point.Name, point.Range.Policy)
+		transformed = rounded
 	}
+	switch number := transformed.(type) {
+	case float64:
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return nil, false, "", fmt.Errorf("point %s is not finite", point.Name)
+		}
+	case float32:
+		if math.IsNaN(float64(number)) || math.IsInf(float64(number), 0) {
+			return nil, false, "", fmt.Errorf("point %s is not finite", point.Name)
+		}
+	}
+	return transformed, true, quality, nil
+}
+func roundEngineering(value float64, precision int) (float64, error) {
+	if precision < 0 || precision > 15 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("invalid precision or non-finite value")
+	}
+	factor := math.Pow10(precision)
+	// At this magnitude float64's own spacing already exceeds the requested
+	// decimal place. Multiplying would add noise or overflow without precision.
+	if math.Abs(value) >= 4503599627370496/factor {
+		return value, nil
+	}
+	rounded := math.Round(value*factor) / factor
+	if math.IsNaN(rounded) || math.IsInf(rounded, 0) {
+		return 0, fmt.Errorf("rounded value is not finite")
+	}
+	return rounded, nil
 }
 
 func min(a, b int) int {

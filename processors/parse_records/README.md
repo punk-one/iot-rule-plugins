@@ -1,0 +1,3 @@
+# parse-records
+
+SDK v1, version 1.0.0. Parse a UTF-8 or explicitly base64 encoded string from input_field into output_field. JSON preserves unsafe large numbers as strings and rejects trailing data/deep containers. CSV supports a single delimiter, unique header names and bounded row count, with all cell values left as strings. XML outputs name/namespace/attributes/content trees preserving mixed-content order, rejects DTD/directives and bounds nodes/depth/tokens. max_records bounds a top-level JSON array, CSV data rows or XML nodes; nested JSON containers have an additional hard 4096-item limit. Parsing does not fan out events; use a separate split stage if needed. Input events are cloned before adding output fields. No file/network access or arbitrary code execution.

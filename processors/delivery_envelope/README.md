@@ -1,0 +1,3 @@
+# delivery-envelope
+
+Place immediately after edge buffer-node. Wraps the owned payload with stable namespaced buffer/record/event/rule identity, canonical payload hash and purpose-separated HMAC-SHA256 signature. Event collection timestamp and SDK metadata/ID remain unchanged for replay. Safe finite numeric range only; large exact integers must already be strings. Configure origin/key/secret per trust scope, at least32 secret bytes. No secret appears in the envelope. This node does not ACK: edge buffer ack_node_id must name the eventual business-ack Sink, not MQTT uplink. Stable wire protocol v1; see docs/BUSINESS_RECEIPTS.md for the full chain.

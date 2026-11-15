@@ -1,0 +1,3 @@
+# sink-business-ack
+
+Edge terminal ACK branch, in the same rule as the original buffer. Validates original delivery and commit receipt signatures, origin/key/committer/age, current rule and configured buffer node before PublishAck. Buffer independently checks rule/node/designated sender/event ID. Forged, cross-rule and wrong-buffer receipts do not delete data. Set buffer-node.ack_node_id to this Sink node ID; a MQTT PUBACK from the telemetry Sink must not be the designated sender. Use a separate MQTT Source branch for receipts within the same rule. Secret compromise or a malicious trusted committer can forge receipts: HMAC authenticates that trust domain, not an external database attestation.

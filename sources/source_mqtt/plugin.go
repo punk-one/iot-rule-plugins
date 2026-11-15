@@ -31,7 +31,7 @@ func (m *MQTTSource) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-mqtt",
 		Name:        "MQTT Source",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Description: "Read MQTT messages through connector_ref and publish decoded MQTT payload as-is",
 		Type:        sdk.PluginTypeSource,
 		Category:    "mqtt",

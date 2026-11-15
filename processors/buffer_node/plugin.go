@@ -51,7 +51,7 @@ type buffer struct {
 }
 
 func (b *buffer) Info() sdk.PluginInfo {
-	return sdk.PluginInfo{ID: "buffer-node", Name: "Persistent Buffer", Version: "1.0.0", Type: sdk.PluginTypeProcessor, Description: "Bounded disk queue with sink confirmation and restart replay", Capabilities: sdk.PluginCapabilities{InputPorts: 1, OutputPorts: 1, Stateful: true, ConfigSchema: `{"type":"object","required":["ack_node_id"],"properties":{"ack_node_id":{"type":"string","title":"确认 Sink 节点 ID"},"retry_ms":{"type":"integer","minimum":2000,"default":5000},"rate_per_second":{"type":"integer","minimum":1,"maximum":1000,"default":100},"storage":{"type":"object","properties":{"db_path":{"type":"string"},"max_records":{"type":"integer","default":100000},"max_bytes":{"type":"integer","default":268435456}}}}}`}}
+	return sdk.PluginInfo{ID: "buffer-node", Name: "Persistent Buffer", Version: "1.0.1", Type: sdk.PluginTypeProcessor, Description: "Bounded disk queue with sink confirmation and restart replay", Capabilities: sdk.PluginCapabilities{InputPorts: 1, OutputPorts: 1, Stateful: true, ConfigSchema: `{"type":"object","required":["ack_node_id"],"properties":{"ack_node_id":{"type":"string","title":"确认 Sink 节点 ID"},"retry_ms":{"type":"integer","minimum":2000,"default":5000},"rate_per_second":{"type":"integer","minimum":1,"maximum":1000,"default":100},"storage":{"type":"object","properties":{"db_path":{"type":"string"},"max_records":{"type":"integer","default":100000},"max_bytes":{"type":"integer","default":268435456}}}}}`}}
 }
 
 func (b *buffer) Init(c sdk.PluginConfig) error {

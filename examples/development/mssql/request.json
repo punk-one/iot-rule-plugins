@@ -1,0 +1,9 @@
+{
+  "connector_ref": "demo-mssql",
+  "query": "SELECT TOP (@limit) event_id,device_code,value FROM dbo.Telemetry WHERE device_code=@device_code ORDER BY event_id",
+  "params": {
+    "limit": "limit",
+    "device_code": "device_code"
+  },
+  "max_rows": 100
+}

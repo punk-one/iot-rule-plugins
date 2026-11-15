@@ -12,7 +12,7 @@ import (
 )
 
 type sourceTestConnector struct {
-	mu sync.Mutex
+	mu         sync.Mutex
 	resp       sdk.ConnectorResponse
 	status     sdk.ResourceStatusEvent
 	reqs       []sdk.ConnectorRequest
@@ -39,7 +39,11 @@ func (c *sourceTestConnector) OpenStream(req sdk.StreamOpenRequest) (sdk.StreamC
 	c.streamReqs = append(c.streamReqs, req)
 	return c.stream, nil
 }
-func(c *sourceTestConnector) streamRequests()[]sdk.StreamOpenRequest{c.mu.Lock();defer c.mu.Unlock();return append([]sdk.StreamOpenRequest(nil),c.streamReqs...)}
+func (c *sourceTestConnector) streamRequests() []sdk.StreamOpenRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]sdk.StreamOpenRequest(nil), c.streamReqs...)
+}
 func (c *sourceTestConnector) CurrentStatus(resourceRef string) (sdk.ResourceStatusEvent, bool) {
 	return c.status, true
 }
@@ -429,7 +433,7 @@ func TestMQTTSourceOpenStreamUsesDeterministicSessionKey(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	reqs:=connector.streamRequests()
+	reqs := connector.streamRequests()
 	if len(reqs) != 1 {
 		t.Fatalf("expected one stream open request, got %d", len(reqs))
 	}

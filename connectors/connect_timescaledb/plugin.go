@@ -32,7 +32,7 @@ func (c *timescaledbConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-timescaledb",
 		Name:        "Connector TimescaleDB",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared TimescaleDB/PostgreSQL connector for source and sink plugins",
 		Category:    "connector",

@@ -1,0 +1,19 @@
+{
+  "connector_ref": "demo-mc",
+  "device_code": "machine-001",
+  "interval_ms": 5000,
+  "points": [
+    {
+      "name": "counter",
+      "area": "D",
+      "address": 100,
+      "valueType": "Uint32"
+    },
+    {
+      "name": "running",
+      "area": "M",
+      "address": 0,
+      "valueType": "Bool"
+    }
+  ]
+}

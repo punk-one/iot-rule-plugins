@@ -112,7 +112,7 @@ func (p *StatusEventPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "process-status-event",
 		Name:        "Process Status Event",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Derive device lifecycle events from snake_case status messages and emit Redis/TimescaleDB payloads",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "stateful",

@@ -1,0 +1,9 @@
+{
+  "connector_ref": "demo-mssql",
+  "statement": "IF NOT EXISTS (SELECT 1 FROM dbo.Telemetry WITH (UPDLOCK,HOLDLOCK) WHERE event_id=@event_id) INSERT INTO dbo.Telemetry(event_id,device_code,value) VALUES(@event_id,@device_code,@value)",
+  "params": {
+    "event_id": "event.id",
+    "device_code": "device_code",
+    "value": "data.temperature"
+  }
+}

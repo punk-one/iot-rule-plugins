@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "properties": {"directory": {"type": "string", "minLength": 1, "default": "./data/file-output"}, "mode": {"enum": ["event_file", "jsonl"], "default": "event_file"}, "file": {"type": "string", "minLength": 1, "default": "events.jsonl"}, "max_event_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576, "default": 1048576}, "max_file_bytes": {"type": "integer", "minimum": 1048576, "maximum": 1073741824, "default": 104857600}, "max_files": {"type": "integer", "minimum": 1, "maximum": 100000, "default": 10000}, "ack_after_sync": {"type": "boolean", "default": false}}, "additionalProperties": false}`

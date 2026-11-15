@@ -1,0 +1,20 @@
+{
+  "connector_ref": "demo-modbus",
+  "device_code": "machine-001",
+  "interval_ms": 5000,
+  "points": [
+    {
+      "name": "counter",
+      "area": "holding",
+      "address": 0,
+      "valueType": "Uint32",
+      "byteOrder": "ABCD"
+    },
+    {
+      "name": "running",
+      "area": "coil",
+      "address": 0,
+      "valueType": "Bool"
+    }
+  ]
+}

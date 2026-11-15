@@ -1,0 +1,5 @@
+# decode-binary
+
+SDK v1, version 1.0.0. Decode a base64 or hex string using explicit named fields, byte offsets and big/little endian. Strings require explicit byte length and valid UTF-8. Hex fields preserve bytes. Int64/Uint64 outside 2^53-1 are decimal strings; non-finite float fields are rejected. Fields must fit the frame and configured byte limit. BCD, text encodings other than UTF-8 and binary encoding/maker output are not implemented. Input events are cloned before adding output fields. No file/network access or arbitrary code execution.
+
+BCD/SignedBCD support explicit 1..8 byte widths, big/little byte order, decimal nibble validation and C/D/F sign nibble; return decimal strings, preserving leading zeros. Bits supports explicit LSB-origin bit_offset/bit_length over 1..8 bytes; unsafe large integers remain strings. String text_encoding: UTF-8, ASCII, Latin-1, UTF-16LE/BE and GB18030. UTF-16 requires an even byte count; invalid decoded sequences are rejected, not silently replaced. Text is decoded before trimming trailing NUL characters.

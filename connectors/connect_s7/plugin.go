@@ -56,7 +56,7 @@ func (c *s7Connector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-s7",
 		Name:        "Connector Siemens S7",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Demand-aware Siemens S7 connector for batched source and sink operations",
 		Category:    "connector",

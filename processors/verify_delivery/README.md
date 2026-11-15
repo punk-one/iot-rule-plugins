@@ -1,0 +1,3 @@
+# verify-delivery
+
+Place before the server durable buffer. Verifies delivery v1 origin/key/age/HMAC/payload hash, then adopts Event ID evt_delivery_{namespaced delivery.id} and original collection time. MQTT re-arrivals therefore deduplicate while pending in the server buffer, avoiding one new persisted record per edge retry during SQL outages. Invalid input never reaches storage; already-buffered input is rejected because changing its Event ID would break the existing ACK relation. Removing an unsigned top-level transport event_id does not change the signed body. Completed deliveries may be persisted again after ACK so a lost application receipt can be regenerated; SQL idempotence remains mandatory.

@@ -24,7 +24,7 @@ func (s *TimescaleSource) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-timeseries-timescaledb",
 		Name:        "Source Timeseries TimescaleDB",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSource,
 		Description: "Poll TimescaleDB through connector_ref and emit row events",
 		Category:    "database",

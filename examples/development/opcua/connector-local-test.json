@@ -1,0 +1,10 @@
+{
+  "id": "demo-opcua",
+  "plugin_id": "connect-opcua",
+  "enabled": true,
+  "connection": {
+    "endpoint": "opc.tcp://127.0.0.1:4840",
+    "security_mode": "None",
+    "session_reuse_ms": 2000
+  }
+}

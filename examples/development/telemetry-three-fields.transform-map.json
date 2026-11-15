@@ -1,0 +1,19 @@
+{
+  "process": {
+    "template": "{}",
+    "expand": [
+      {
+        "from": "payload.device_code",
+        "to": "device_code"
+      },
+      {
+        "from": "payload.data",
+        "to": "data"
+      },
+      {
+        "from": "payload.time",
+        "to": "time"
+      }
+    ]
+  }
+}

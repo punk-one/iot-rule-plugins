@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
 )
 
@@ -74,7 +72,10 @@ func (d *mqttMessageDeque) grow() {
 }
 
 type mqttConsumerSession struct {
-	id string
+	residentBytes int
+	reserve       func(int) bool
+	release       func(int)
+	id            string
 
 	mu                  sync.Mutex
 	topics              map[string]struct{}
@@ -135,59 +136,74 @@ func normalizeMQTTOverflowPolicy(policy string) string {
 	}
 }
 
-func (s *mqttConsumerSession) enqueue(message mqttInboundMessage) {
+func (s *mqttConsumerSession) enqueue(message mqttInboundMessage) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if s.closed {
-		return
+		return false
 	}
+	cost := streamCost(message.RawPayload, message.Topic, message.Subscription, message.ReceivedAt)
+	if len(message.RawPayload) > mqttPayloadLimit || !s.ensureRoomLocked(cost) {
+		return false
+	}
+	for s.reserve != nil && !s.reserve(cost) {
+		s.overflowTotal++
+		if !s.dropOldestLocked() {
+			return false
+		}
+	}
+	s.residentBytes += cost
 	s.nextSequence++
-	deliveryID := fmt.Sprintf("%s:%d", s.id, s.nextSequence)
-	streamMessage := sdk.StreamMessage{
-		StreamID:            s.id,
-		DeliveryID:          deliveryID,
-		Sequence:            s.nextSequence,
-		Topic:               message.Topic,
-		RawPayload:          append([]byte(nil), message.RawPayload...),
-		Metadata:            map[string]string{"mqtt_topic": message.Topic, "mqtt_subscription": message.Subscription, "received_at": message.ReceivedAt},
-		PublishedAtUnixNano: time.Now().UnixNano(),
-	}
-	if !s.ensureRoomLocked() {
-		s.updateStarvationLocked()
-		return
-	}
-	s.ready.pushBack(streamMessage)
+	id := fmt.Sprintf("%s:%d", s.id, s.nextSequence)
+	s.ready.pushBack(sdk.StreamMessage{StreamID: s.id, DeliveryID: id, Sequence: s.nextSequence, Topic: message.Topic, RawPayload: append([]byte(nil), message.RawPayload...), Metadata: map[string]string{"mqtt_topic": message.Topic, "mqtt_subscription": message.Subscription, "received_at": message.ReceivedAt}, PublishedAtUnixNano: time.Now().UnixNano()})
 	s.updateStarvationLocked()
 	s.signal()
+	return true
 }
-
-func (s *mqttConsumerSession) ensureRoomLocked() bool {
-	if s.maxBufferedMessages <= 0 || s.backlogLenLocked() < s.maxBufferedMessages {
-		return true
+func (s *mqttConsumerSession) messageCost(m sdk.StreamMessage) int {
+	return streamCost(m.RawPayload, m.Topic, m.Metadata["mqtt_subscription"], m.Metadata["received_at"])
+}
+func (s *mqttConsumerSession) freeMessage(m sdk.StreamMessage) {
+	cost := s.messageCost(m)
+	s.residentBytes -= cost
+	if s.release != nil {
+		s.release(cost)
 	}
-	now := time.Now()
-	s.overflowTotal++
-	s.lastOverflowAt = now
-
-	switch s.overflowPolicy {
-	case "drop_newest", "pause_fetch":
-		return false
-	case "fail_session":
-		s.closed = true
-		s.signal()
-		return false
-	case "drop_oldest":
-		if _, ok := s.ready.popFront(); ok {
-			return true
+}
+func (s *mqttConsumerSession) dropOldestLocked() bool {
+	if s.overflowPolicy != "drop_oldest" {
+		if s.overflowPolicy == "fail_session" {
+			s.closed = true
+			s.signal()
 		}
-		if _, ok := s.requeue.popFront(); ok {
-			return true
-		}
-		return true
-	default:
 		return false
 	}
+	message, ok := s.ready.popFront()
+	if !ok {
+		message, ok = s.requeue.popFront()
+	}
+	if ok {
+		s.freeMessage(message)
+	}
+	return ok
+}
+func (s *mqttConsumerSession) ensureRoomLocked(wanted ...int) bool {
+	cost := 0
+	if len(wanted) > 0 {
+		cost = wanted[0]
+	}
+	if cost > mqttSessionByteLimit {
+		s.overflowTotal++
+		return false
+	}
+	for s.backlogLenLocked()+len(s.pending) >= s.maxBufferedMessages || s.residentBytes+cost > mqttSessionByteLimit {
+		s.overflowTotal++
+		s.lastOverflowAt = time.Now()
+		if !s.dropOldestLocked() {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *mqttConsumerSession) backlogLenLocked() int {
@@ -201,7 +217,7 @@ func (s *mqttConsumerSession) receive(ctx context.Context, maxMessages int) ([]s
 			return messages, nil
 		}
 		if closed {
-			return nil, nil
+			return nil, fmt.Errorf("MQTT stream is closed or overflowed")
 		}
 
 		s.mu.Lock()
@@ -253,6 +269,7 @@ func (s *mqttConsumerSession) dispatchAvailableLocked(maxMessages int) []sdk.Str
 			break
 		}
 		s.availableCredits--
+		message.Metadata["mqtt_overflow_total"] = fmt.Sprintf("%d", s.overflowTotal)
 		s.pending[message.DeliveryID] = message
 		messages = append(messages, message)
 	}
@@ -263,35 +280,33 @@ func (s *mqttConsumerSession) dispatchAvailableLocked(maxMessages int) []sdk.Str
 func (s *mqttConsumerSession) ack(req sdk.StreamAckRequest) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	message, ok := s.pending[req.DeliveryID]
+	if !ok {
+		return
+	}
 	delete(s.pending, req.DeliveryID)
-	if req.Credits > 0 {
-		s.availableCredits += req.Credits
-	}
+	s.freeMessage(message)
+	s.availableCredits = min(1024, s.availableCredits+max(0, min(req.Credits, 1024)))
 	s.updateStarvationLocked()
-	if s.backlogLenLocked() > 0 && s.availableCredits > 0 {
-		s.signal()
-	}
+	s.signal()
 }
-
 func (s *mqttConsumerSession) nack(req sdk.StreamNackRequest) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	message, ok := s.pending[req.DeliveryID]
-	if ok {
-		delete(s.pending, req.DeliveryID)
+	if !ok {
+		return
 	}
-	if req.Credits > 0 {
-		s.availableCredits += req.Credits
+	delete(s.pending, req.DeliveryID)
+	// Requeue moves existing memory; it neither allocates nor re-reserves bytes.
+	if req.Requeue && !s.closed {
+		s.requeue.pushFront(message)
+	} else {
+		s.freeMessage(message)
 	}
-	if req.Requeue && ok {
-		if s.ensureRoomLocked() {
-			s.requeue.pushFront(message)
-		}
-	}
+	s.availableCredits = min(1024, s.availableCredits+max(0, min(req.Credits, 1024)))
 	s.updateStarvationLocked()
-	if s.backlogLenLocked() > 0 && s.availableCredits > 0 {
-		s.signal()
-	}
+	s.signal()
 }
 
 func (s *mqttConsumerSession) grantCredits(credits int) {
@@ -299,7 +314,7 @@ func (s *mqttConsumerSession) grantCredits(credits int) {
 		return
 	}
 	s.mu.Lock()
-	s.availableCredits += credits
+	s.availableCredits = min(1024, s.availableCredits+min(credits, 1024))
 	s.updateStarvationLocked()
 	shouldSignal := s.backlogLenLocked() > 0
 	s.mu.Unlock()
@@ -310,11 +325,14 @@ func (s *mqttConsumerSession) grantCredits(credits int) {
 
 func (s *mqttConsumerSession) close() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
-	}
 	s.closed = true
+	if s.release != nil && s.residentBytes > 0 {
+		s.release(s.residentBytes)
+	}
+	s.residentBytes = 0
+	s.ready = mqttMessageDeque{}
+	s.requeue = mqttMessageDeque{}
+	s.pending = map[string]sdk.StreamMessage{}
 	s.mu.Unlock()
 	s.signal()
 }
@@ -336,49 +354,6 @@ func (s *mqttConsumerSession) signal() {
 	}
 }
 
-func (c *mqttConnector) openConsumerStream(resource *mqttResource, req sdk.StreamOpenRequest) (sdk.StreamOpenResponse, error) {
-	var payload mqttReadPayload
-	if err := json.Unmarshal(req.Payload, &payload); err != nil {
-		return sdk.StreamOpenResponse{}, fmt.Errorf("parse stream payload: %w", err)
-	}
-	if len(payload.Topics) == 0 {
-		return sdk.StreamOpenResponse{}, fmt.Errorf("stream.topics is required")
-	}
-
-	client, err := c.ensureConnected(resource)
-	if err != nil {
-		return sdk.StreamOpenResponse{}, err
-	}
-
-	sessionID := strings.TrimSpace(req.SessionKey)
-	if sessionID == "" {
-		sessionID = req.ResourceRef
-	}
-	if sessionID == "" {
-		return sdk.StreamOpenResponse{}, fmt.Errorf("stream session key is required")
-	}
-
-	session := newMQTTConsumerSession(sessionID, req)
-
-	resource.mu.Lock()
-	if current, ok := resource.sessions[sessionID]; ok {
-		current.close()
-		delete(resource.sessions, sessionID)
-	}
-	resource.sessions[sessionID] = session
-	resource.mu.Unlock()
-
-	if err := c.ensureSessionSubscription(resource, session, payload.Topics, byte(payload.QoS), client); err != nil {
-		return sdk.StreamOpenResponse{}, err
-	}
-
-	return sdk.StreamOpenResponse{
-		StreamID:          sessionID,
-		DeliverySemantics: sdk.StreamDeliveryAtLeastOnce,
-		InitialCredits:    session.availableCredits,
-	}, nil
-}
-
 func (c *mqttConnector) receiveConsumerStream(resource *mqttResource, req sdk.StreamReceiveRequest) (sdk.StreamReceiveResponse, error) {
 	session, err := c.getSession(resource, req.StreamID)
 	if err != nil {
@@ -390,6 +365,9 @@ func (c *mqttConnector) receiveConsumerStream(resource *mqttResource, req sdk.St
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	if _, err = c.ensureConnected(resource); err != nil {
+		return sdk.StreamReceiveResponse{}, err
+	}
 	messages, err := session.receive(ctx, req.MaxMessages)
 	if err != nil {
 		return sdk.StreamReceiveResponse{}, err
@@ -421,79 +399,6 @@ func (c *mqttConnector) grantConsumerCredits(resource *mqttResource, req sdk.Str
 		return err
 	}
 	session.grantCredits(req.Credits)
-	return nil
-}
-
-func (c *mqttConnector) closeConsumerStream(resource *mqttResource, req sdk.StreamCloseRequest) error {
-	resource.mu.Lock()
-	session, ok := resource.sessions[req.StreamID]
-	if !ok {
-		resource.mu.Unlock()
-		return nil
-	}
-	delete(resource.sessions, req.StreamID)
-	for topic := range session.topics {
-		state := resource.subscriptions[topic]
-		if state == nil {
-			continue
-		}
-		delete(state.sessions, req.StreamID)
-		if len(state.tokens) == 0 && len(state.sessions) == 0 && mqttClientReady(resource.client) {
-			unsub := resource.client.Unsubscribe(resource.effectiveTopic(topic))
-			if unsub.Wait() && unsub.Error() != nil {
-				resource.mu.Unlock()
-				return unsub.Error()
-			}
-			delete(resource.subscriptions, topic)
-		}
-	}
-	resource.mu.Unlock()
-	session.close()
-	return nil
-}
-
-func (c *mqttConnector) ensureSessionSubscription(resource *mqttResource, session *mqttConsumerSession, topics []string, qos byte, client mqtt.Client) error {
-	resource.mu.Lock()
-	defer resource.mu.Unlock()
-
-	for _, topic := range topics {
-		topic = strings.TrimSpace(topic)
-		if topic == "" {
-			continue
-		}
-		if _, ok := session.topics[topic]; ok {
-			continue
-		}
-
-		session.topics[topic] = struct{}{}
-		state, ok := resource.subscriptions[topic]
-		if !ok {
-			state = &mqttSubscription{
-				qos:      qos,
-				tokens:   make(map[string]struct{}),
-				sessions: make(map[string]struct{}),
-			}
-			effectiveTopic := resource.effectiveTopic(topic)
-			tokenResult := client.Subscribe(effectiveTopic, qos, c.makeMessageHandler(resource, topic))
-			if tokenResult.Wait() && tokenResult.Error() != nil {
-				delete(session.topics, topic)
-				return tokenResult.Error()
-			}
-			resource.subscriptions[topic] = state
-		} else if qos > state.qos {
-			effectiveTopic := resource.effectiveTopic(topic)
-			tokenResult := client.Subscribe(effectiveTopic, qos, c.makeMessageHandler(resource, topic))
-			if tokenResult.Wait() && tokenResult.Error() != nil {
-				delete(session.topics, topic)
-				return tokenResult.Error()
-			}
-			state.qos = qos
-		}
-		if state.sessions == nil {
-			state.sessions = make(map[string]struct{})
-		}
-		state.sessions[session.id] = struct{}{}
-	}
 	return nil
 }
 

@@ -1,67 +1,32 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SDK_ROOT="$(cd "${REPO_ROOT}/../iot-rule-plugin-sdk" && pwd)"
+export GOWORK=off
 
-PLUGINS=(
-  "connectors/connect_mqtt"
-  "connectors/connect_postgres"
-  "connectors/connect_redis"
-  "connectors/connect_s7"
-  "connectors/connect_tdengine"
-  "connectors/connect_timescaledb"
-  "processors/detect_change"
-  "processors/javascript_transform"
-  "processors/process_status_event"
-  "processors/redis_relationship_mapping"
-  "processors/transform"
-  "processors/transform_map"
-  "sinks/sink_mqtt"
-  "sinks/sink_postgres"
-  "sinks/sink_redis"
-  "sinks/sink_s7"
-  "sinks/tdengine_sink"
-  "sinks/timescaledb_sink"
-  "sources/source_mqtt"
-  "sources/source_postgres"
-  "sources/source_redis"
-  "sources/source_s7"
-  "sources/source_timescaledb"
-)
-
-cleanup_replaces() {
-  for entry in "${PLUGINS[@]}"; do
-    if [[ -f "${REPO_ROOT}/${entry}/go.mod" ]]; then
-      (cd "${REPO_ROOT}/${entry}" && go mod edit -dropreplace=github.com/punk-one/iot-rule-plugin-sdk 2>/dev/null || true)
-    fi
+# Synchronize independent consumers against the published stable SDK contract.
+# No sibling checkout, local replace or workspace file is used or created.
+modules=("${REPO_ROOT}")
+for category in connectors sources processors sinks; do
+  for manifest in "${REPO_ROOT}/${category}"/*/plugin.json; do
+    [[ -f "${manifest}" ]] || continue
+    modules+=("$(dirname "${manifest}")")
   done
-  (cd "${REPO_ROOT}" && go mod edit -dropreplace=github.com/punk-one/iot-rule-plugin-sdk 2>/dev/null || true)
-}
-trap cleanup_replaces EXIT
-
-for entry in "${PLUGINS[@]}"; do
-  plugin_dir="${REPO_ROOT}/${entry}"
-  module_path="github.com/punk-one/iot-rule-plugins/${entry}"
-  if [[ ! -f "${plugin_dir}/go.mod" ]]; then
-    (cd "${plugin_dir}" && GOWORK=off go mod init "${module_path}")
-  fi
-  (cd "${plugin_dir}" && go mod edit -require=github.com/punk-one/iot-rule-plugin-sdk@v1.0.0)
-  (cd "${plugin_dir}" && go mod edit -replace=github.com/punk-one/iot-rule-plugin-sdk="${SDK_ROOT}")
 done
 
-(cd "${REPO_ROOT}" && go mod edit -require=github.com/punk-one/iot-rule-plugin-sdk@v1.0.0)
-(cd "${REPO_ROOT}" && go mod edit -replace=github.com/punk-one/iot-rule-plugin-sdk="${SDK_ROOT}")
-(cd "${REPO_ROOT}" && go mod edit -dropreplace=github.com/taosdata/driver-go/v3 2>/dev/null || true)
-
-for entry in "${PLUGINS[@]}"; do
-  echo "tidy ${entry}"
-  (cd "${REPO_ROOT}/${entry}" && go mod tidy)
+for module in "${modules[@]}"; do
+  [[ -f "${module}/go.mod" ]] || { echo "missing independent go.mod: ${module}" >&2; exit 1; }
+  echo "sync ${module#"${REPO_ROOT}"}"
+  (
+    cd "${module}"
+    go mod edit -go=1.27.4 -require=github.com/punk-one/iot-rule-plugin-sdk@v1.0.0
+    go get google.golang.org/grpc@v1.85.0 golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.59.0
+    go mod tidy
+    replacement="$(go list -m -f '{{if .Replace}}replaced{{end}}' github.com/punk-one/iot-rule-plugin-sdk)"
+    if [[ -n "${replacement}" ]]; then
+      echo 'SDK replacement is not permitted in independent release modules' >&2
+      exit 1
+    fi
+  )
 done
-
-(cd "${REPO_ROOT}" && go mod tidy)
-cleanup_replaces
-trap - EXIT
-(cd "${REPO_ROOT}" && go work sync)

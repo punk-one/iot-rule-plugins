@@ -32,14 +32,33 @@ func TestPluginsAreIndependentModulesAndManifestsMatch(t *testing.T) {
 		}
 		manifestPaths = append(manifestPaths, matches...)
 	}
-	if len(manifestPaths) != 24 {
-		t.Fatalf("plugin manifests=%d, want 24", len(manifestPaths))
+	catalogData, err := os.ReadFile(filepath.Join(root, "docs", "PLUGIN_CATALOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := map[string]string{}
+	for _, line := range strings.Split(string(catalogData), "\n") {
+		parts := strings.Split(line, "|")
+		if len(parts) != 7 || strings.TrimSpace(parts[1]) == "ID" || strings.HasPrefix(strings.TrimSpace(parts[1]), "---") {
+			continue
+		}
+		id, version := strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if id == "" || catalog[id] != "" {
+			t.Fatalf("invalid or duplicate catalog ID %q", id)
+		}
+		catalog[id] = version
+	}
+	if len(manifestPaths) != len(catalog) || len(catalog) < 24 {
+		t.Fatalf("manifest count %d does not match documented plugin catalog %d", len(manifestPaths), len(catalog))
 	}
 
 	seen := make(map[string]string, len(manifestPaths))
 	for _, manifestPath := range manifestPaths {
 		pluginDir := filepath.Dir(manifestPath)
 		manifest := readManifest(t, manifestPath)
+		if catalog[manifest.ID] != manifest.Version {
+			t.Fatalf("catalog version missing/stale for %s", manifest.ID)
+		}
 		if manifest.SchemaVersion != 1 || manifest.SDK != "github.com/punk-one/iot-rule-plugin-sdk@v1.0.0" {
 			t.Fatalf("invalid frozen fields in %s: %+v", manifestPath, manifest)
 		}

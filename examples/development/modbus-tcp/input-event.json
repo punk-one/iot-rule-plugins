@@ -1,0 +1,11 @@
+{
+  "device_code": "machine-001",
+  "data": {
+    "demo_coils": [
+      true,
+      false,
+      true
+    ]
+  },
+  "time": 1794614400000
+}

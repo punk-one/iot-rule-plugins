@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "properties": {"host": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 3306}, "database": {"type": "string", "minLength": 1}, "username": {"type": "string", "minLength": 1}, "password": {"type": "string", "format": "password"}, "timeout_ms": {"type": "integer", "minimum": 50, "maximum": 30000, "default": 5000}, "max_connections": {"type": "integer", "minimum": 1, "maximum": 64, "default": 8}, "max_rows": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 1000}, "allow_write": {"type": "boolean", "default": false}}, "required": ["host", "database", "username"], "additionalProperties": false}`

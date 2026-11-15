@@ -1,0 +1,13 @@
+# Security build baseline — 2026-11-14
+
+SDK contract and dependency tag remain `github.com/punk-one/iot-rule-plugin-sdk v1.0.0`. API stability does not freeze the compiler, standard library or transport dependency patches. Consumers independently select compatible patched dependency versions through their own go.mod; no SDK source, protocol version, local replace or go.work changes.
+
+The previous Go1.25.13/gRPC1.61 baseline produced reachable vulnerability findings during SFTP dependency verification (13 grouped findings including the standard library, x/net HTTP/2 and gRPC). Raw evidence is retained in the local test directory logs; it is not a claim that all those paths are remotely reachable in the Engine deployment. Plugin RPC transport is process-local, but known vulnerable runtimes should still be removed from released artifacts.
+
+Chosen build compiler/minimum: **Go1.27.4**. It was fetched using Go's verified toolchain download into the local toolchain module cache; the system compiler was not replaced. Selected runtime modules: **gRPC1.85.0, x/net0.62.0, x/crypto0.59.0** and their resolved protobuf/genproto dependencies. Independent go.mod/go.sum and CI/release toolchains must agree. Existing artifact versions receive a patch bump; unreleased development modules retain1.0.0. Old binaries are not repaired by editing a lock file: rebuild, retest and sign the actual artifacts before release.
+
+SFTP and MongoDB `govulncheck v1.9.0` reachable-symbol scans passed after this upgrade. The earlier scanner v1.1.4 cannot analyze Go1.27's SSA and crashed; its crash is not a clean scan. Repository-wide tests/race/vet, native/cross-builds and real Engine sidecar interoperability must be rerun after all consumers change. Results from the previous compiler remain historical evidence only. This file records the selected baseline, not final full-scope completion or production authorization.
+
+Dependencies remain independently licensed. x/crypto, x/net and Go are BSD-3-Clause; gRPC/protobuf and MongoDB driver are Apache-2.0. Preserve upstream LICENSE/NOTICE and per-artifact SBOM. No proprietary libraries, keys, test databases or compiled toolchains enter Git.
+
+Engine-specific follow-up selected NATS server2.11.15, PGX5.9.2, QUIC0.59.1 and klauspost/compress1.20.3. Buffer also upgrades its compression dependency. The final verbose Engine scan (symbols, imported packages and modules) reports `No vulnerabilities found`; old raw findings remain historical evidence. Final Engine race/vet/build and local integration/receipt runs passed after these patches. This is dated dependency evidence, not a guarantee against future vulnerabilities.

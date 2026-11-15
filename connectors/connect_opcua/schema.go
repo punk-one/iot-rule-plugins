@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "properties": {"endpoint": {"type": "string", "pattern": "^opc.tcp://"}, "security_mode": {"type": "string", "enum": ["None", "SignAndEncrypt"], "default": "SignAndEncrypt"}, "client_certificate_file": {"type": "string"}, "private_key_file": {"type": "string"}, "server_certificate_file": {"type": "string"}, "username": {"type": "string"}, "password": {"type": "string", "format": "password"}, "timeout_ms": {"type": "integer", "minimum": 50, "maximum": 30000, "default": 5000}, "session_reuse_ms": {"type": "integer", "minimum": 0, "maximum": 30000, "default": 2000}}, "required": ["endpoint"], "additionalProperties": false}`

@@ -1,0 +1,6 @@
+{
+  "key_path": "device_code",
+  "value_path": "data.temperature",
+  "window_ms": 5000,
+  "max_count": 100
+}

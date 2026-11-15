@@ -32,7 +32,7 @@ func (c *tdengineConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-tdengine",
 		Name:        "Connector TDengine",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared TDengine 3.0 connector for sink plugins",
 		Category:    "connector",

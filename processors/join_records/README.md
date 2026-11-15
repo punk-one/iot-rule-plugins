@@ -1,0 +1,3 @@
+# join-records
+
+Input parts:{id,index,count}, configured record field. Out-of-order arrival accepted; identical duplicate index ignored, conflicts rejected. Complete output has records in index order and join:{id,partial,missing}; partial timeout is opt-in (nil holes), default drops incomplete groups. Group/part/total-byte limits; initial deadline does not extend. Completion tombstone lasts until original deadline, bounded by max_groups. Volatile state and tombstones do not provide restart deduplication; stop discards all state. Buffered inputs are rejected. Place durable buffer after joining; no aggregate input ACK is invented.

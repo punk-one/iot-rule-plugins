@@ -9,6 +9,7 @@ import (
 )
 
 type S7SourceConfig struct {
+	ScanMode     string     `json:"scan_mode,omitempty"`
 	ConnectorRef string     `json:"connector_ref"`
 	Output       outputConf `json:"output"`
 	Points       []PointDef `json:"points"`
@@ -33,6 +34,7 @@ type PointDef struct {
 	ReadWrite   string      `json:"read_write,omitempty"`
 	Description string      `json:"description,omitempty"`
 	MaxLength   int         `json:"max_length,omitempty"`
+	Offset      float64     `json:"offset,omitempty"`
 	Scale       *float64    `json:"scale,omitempty"`
 	Precision   *int        `json:"precision,omitempty"`
 	Range       *PointRange `json:"range,omitempty"`
@@ -57,6 +59,7 @@ const s7SourceConfigSchema = `{
   "type": "object",
   "required": ["connector_ref", "output", "points"],
   "properties": {
+ "scan_mode":{"type":"string","enum":["poll","coordinated"],"default":"poll","description":"Merge due scans across Sources sharing a resource; requires Engine coordinated-scan support"},
     "connector_ref": {
       "type": "string",
       "title": "Connector Ref",
@@ -93,12 +96,13 @@ const s7SourceConfigSchema = `{
 		  "read_write": {"type": "string", "title": "Read / Write", "enum": ["R", "RO", "RW"], "default": "R"},
 		  "description": {"type": "string", "title": "Description"},
 		  "max_length": {"type": "integer", "title": "Max Length", "minimum": 1, "maximum": 254},
+		  "offset":{"type":"number","title":"Offset","default":0},
 		  "scale": {"type": "number", "title": "Scale", "exclusiveMinimum": 0, "default": 1},
-		  "precision": {"type": "integer", "title": "Precision", "description": "Decimal places after scaling; 0 is valid", "minimum": 0, "maximum": 15},
+		  "precision": {"type": "integer", "title": "Precision", "description": "Decimal places after scaling and range policy; 0 is valid", "minimum": 0, "maximum": 15},
 		  "range": {
 			"type": "object",
 			"title": "Valid Range",
-			"description": "Optional engineering-value bounds applied after scaling and precision",
+			"description": "Engineering-value bounds applied after scaling and before precision",
 			"properties": {
 			  "minimum": {"type": "number", "title": "Minimum"},
 			  "maximum": {"type": "number", "title": "Maximum"},
@@ -131,6 +135,9 @@ func (s *S7Source) validateConfig(raw []byte) error {
 	}
 	s.cfg.ConnectorRef = strings.TrimSpace(s.cfg.ConnectorRef)
 	s.cfg.Output.DeviceCode = strings.TrimSpace(s.cfg.Output.DeviceCode)
+	if s.cfg.ScanMode != "" && s.cfg.ScanMode != "poll" && s.cfg.ScanMode != "coordinated" {
+		return fmt.Errorf("invalid scan_mode")
+	}
 	if s.cfg.ConnectorRef == "" {
 		return fmt.Errorf("connector_ref is required")
 	}
@@ -169,6 +176,9 @@ func (s *S7Source) validateConfig(raw []byte) error {
 		if pt.ReadWrite != "R" && pt.ReadWrite != "RO" && pt.ReadWrite != "RW" {
 			return fmt.Errorf("point %s read_write must be R, RO, or RW", pt.Name)
 		}
+		if math.IsNaN(pt.Offset) || math.IsInf(pt.Offset, 0) {
+			return fmt.Errorf("point %s offset must be finite", pt.Name)
+		}
 		if pt.Scale != nil {
 			if math.IsNaN(*pt.Scale) || math.IsInf(*pt.Scale, 0) || *pt.Scale <= 0 {
 				return fmt.Errorf("point %s scale must be a finite number greater than 0", pt.Name)
@@ -177,7 +187,7 @@ func (s *S7Source) validateConfig(raw []byte) error {
 		if pt.Precision != nil && (*pt.Precision < 0 || *pt.Precision > 15) {
 			return fmt.Errorf("point %s precision must be between 0 and 15", pt.Name)
 		}
-		if !isNumericValueType(pt.ValueType) && ((pt.Scale != nil && *pt.Scale != 1) || pt.Precision != nil) {
+		if !isNumericValueType(pt.ValueType) && ((pt.Scale != nil && *pt.Scale != 1) || pt.Offset != 0 || pt.Precision != nil) {
 			return fmt.Errorf("point %s scale and precision are only supported for numeric value types", pt.Name)
 		}
 		if err := validatePointRange(*pt); err != nil {

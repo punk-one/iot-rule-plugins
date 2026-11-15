@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "connect-lsv2",
+  "version": "1.0.0",
+  "type": "connector",
+  "sdk": "github.com/punk-one/iot-rule-plugin-sdk@v1.0.0",
+  "module": "github.com/punk-one/iot-rule-plugins/connectors/connect_lsv2",
+  "description": "Read-only Heidenhain LSV2 version, state, overrides, tool, axes and program queries"
+}

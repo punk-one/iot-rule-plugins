@@ -1,0 +1,3 @@
+# connect-websocket
+
+One lazy persistent socket per resource, shared by Sources and Sinks. Bounded fanout queues (64 consumers, 1 MiB each, 8 MiB total), frame limits, credits and fail_session overflow. Ping/pong, TLS verification and finite writes; no transparent write retry. SDK stream is explicitly best_effort: local handoff ACK only grants credits, it is not a peer or business acknowledgement. Queue overflow/session loss can lose frames. Source reconnects with backoff; no replay protocol is invented. No permessage-deflate. Stop closes socket and goroutines; last Source close releases socket. [Concurrency contract](https://pkg.go.dev/github.com/gorilla/websocket#hdr-Concurrency).

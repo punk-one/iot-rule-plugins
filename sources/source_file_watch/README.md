@@ -1,0 +1,7 @@
+# source-file-watch
+
+SDK v1, version 1.0.0. Linux amd64/arm64 file source, local filesystem only. Watches one explicitly configured directory without recursion; dotfiles and symlinks are skipped. A held directory descriptor plus openat/O_NOFOLLOW prevents files being redirected outside the configured root. Total directory entries, file bytes and observations are bounded. Size/mtime must remain stable for stable_ms, with a second stat after reading.
+
+Persistent bbolt digest checkpoints advance only after successful event handoff. Event IDs are deterministic for rule/node/name/content digest so downstream idempotency can handle crash-before-checkpoint duplicates. Use reliable Engine delivery for durable handoff; this source alone does not prove final business commit. A file removed and later reintroduced can be re-emitted (its ID remains deterministic for the same content). Keep state_dir outside the input directory. Shared state files are locked; each rule/node/root has its own file.
+
+Emits device_code, raw or raw_base64, file(name,sha256,size,modified_at), time. Follow with parse-records or decode-binary. Stable observation is not an atomic writer protocol: writers should publish completed files via atomic rename and must not preserve size/mtime while changing content. Local I/O failure and disk-full recovery require deployment acceptance. No network shares, recursive traversal or file deletion/archiving is provided.

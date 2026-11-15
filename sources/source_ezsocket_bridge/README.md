@@ -1,0 +1,3 @@
+# source-ezsocket-bridge
+
+Polls GET /v1/devices/{configured device_code}/telemetry on bound connect-http. That Connector owns origin, TLS verification and Bearer authentication. Requires envelope schema_version=1, exact device_code, data/quality objects and positive integer ms timestamp. Preserves the envelope as event payload; no guessed alias mapping or extra nesting. Latest-only/backoff/ETag, independent instances. Requires the separate operator-installed Windows EZSocket bridge and a licensed COM server; no Linux COM stub or write endpoint. See bridges/ezsocket_windows for deployment and vendor verification boundaries.

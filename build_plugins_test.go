@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -74,11 +75,16 @@ func buildScriptFixtureRepo(t *testing.T) string {
 		filepath.Join(repoRoot, "build-plugins.sh"),
 		0o755,
 	)
-	mustCopyFile(t,
-		filepath.Join(sourceRoot, "cmd", "pluginmanifest", "main.go"),
-		filepath.Join(repoRoot, "cmd", "pluginmanifest", "main.go"),
-		0o644,
-	)
+	toolFiles, err := filepath.Glob(filepath.Join(sourceRoot, "cmd", "pluginmanifest", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, toolFile := range toolFiles {
+		if strings.HasSuffix(toolFile, "_test.go") {
+			continue
+		}
+		mustCopyFile(t, toolFile, filepath.Join(repoRoot, "cmd", "pluginmanifest", filepath.Base(toolFile)), 0o644)
+	}
 
 	mustWriteFile(t, filepath.Join(repoRoot, "go.mod"), "module fixture-build-script\n\ngo 1.25.0\n", 0o644)
 	mustWriteFile(t, filepath.Join(repoRoot, "sources", "source_mqtt", "go.mod"), "module fixture-source-mqtt\n\ngo 1.25.0\n", 0o644)
@@ -128,4 +134,27 @@ func mustCopyFileErr(srcPath, dstPath string, mode os.FileMode) error {
 		return err
 	}
 	return os.WriteFile(dstPath, input, mode)
+}
+
+func TestDefaultDiscoveryIncludesNewIndependentModule(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux artifact test")
+	}
+	root := buildScriptFixtureRepo(t)
+	module := filepath.Join(root, "processors", "new_independent")
+	mustWriteFile(t, filepath.Join(module, "go.mod"), "module fixture-new\n\ngo 1.27.4\n", 0644)
+	mustWriteFile(t, filepath.Join(module, "main.go"), "package main\nfunc main(){}\n", 0644)
+	mustWriteFile(t, filepath.Join(module, "plugin.json"), `{"schema_version":1,"id":"new-independent","version":"1.0.0","type":"processor","sdk":"github.com/punk-one/iot-rule-plugin-sdk@v1.0.0","module":"fixture-new"}`+"\n", 0644)
+	cmd := exec.Command("bash", filepath.Join(root, "build-plugins.sh"))
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GOWORK=off", "PLUGINS_OVERRIDE=")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("default discovery failed: %v\n%s", err, output)
+	}
+	for _, file := range []string{"sources/source-mqtt-1.2.3.so", "processors/new-independent-1.0.0.so"} {
+		if _, err := os.Stat(filepath.Join(root, "dist/plugins", file)); err != nil {
+			t.Fatal(file, err)
+		}
+	}
 }

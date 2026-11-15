@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "platforms": [
+    "linux/amd64",
+    "linux/arm/v7"
+  ],
+  "requires_cgo": true,
+  "native_dependency": "operator-provided FANUC FOCAS shared library; matching ELF architecture and SHA256 required",
+  "redistribute_native_library": false
+}

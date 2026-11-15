@@ -1,0 +1,11 @@
+{
+  "connector_ref": "demo-opcua",
+  "device_code": "machine-001",
+  "interval_ms": 5000,
+  "points": [
+    {
+      "name": "temperature",
+      "node_id": "ns=2;s=Machine.Temperature"
+    }
+  ]
+}

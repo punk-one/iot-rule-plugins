@@ -1,0 +1,11 @@
+{
+  "id": "demo-mssql",
+  "plugin_id": "connect-mssql",
+  "enabled": true,
+  "connection": {
+    "host": "db.example.invalid",
+    "database": "demo",
+    "username": "rule_engine",
+    "allow_write": true
+  }
+}

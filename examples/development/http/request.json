@@ -1,0 +1,6 @@
+{
+  "connector_ref": "demo-http",
+  "method": "POST",
+  "path": "/events",
+  "response_field": "response"
+}

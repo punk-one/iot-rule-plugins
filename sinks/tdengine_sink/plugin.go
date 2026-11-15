@@ -33,7 +33,7 @@ func (p *TDengineSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-timeseries-tdengine",
 		Name:        "Sink Timeseries TDengine",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Write row payloads to TDengine 3.0 through connector_ref",
 		Type:        sdk.PluginTypeSink,
 		Category:    "storage",

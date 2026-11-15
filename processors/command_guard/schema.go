@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "properties": {"device_code": {"type": "string", "minLength": 1}, "allowed_operations": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "state_dir": {"type": "string", "default": "./state/command-guard"}, "max_ttl_ms": {"type": "integer", "minimum": 100, "maximum": 86400000, "default": 300000}, "retention_ms": {"type": "integer", "minimum": 100, "maximum": 604800000, "default": 86400000}, "clock_skew_ms": {"type": "integer", "minimum": 0, "maximum": 60000, "default": 5000}, "max_commands": {"type": "integer", "minimum": 1, "maximum": 100000, "default": 10000}}, "required": ["device_code", "allowed_operations"], "additionalProperties": false}`

@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "required": ["host", "source_node", "destination_node"], "properties": {"host": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 9600}, "mode": {"enum": ["udp", "tcp"], "default": "udp"}, "source_node": {"type": "integer", "minimum": 1, "maximum": 254}, "destination_node": {"type": "integer", "minimum": 1, "maximum": 254}, "source_network": {"type": "integer", "minimum": 0, "maximum": 127, "default": 0}, "destination_network": {"type": "integer", "minimum": 0, "maximum": 127, "default": 0}, "timeout_ms": {"type": "integer", "minimum": 50, "maximum": 30000, "default": 3000}}, "additionalProperties": false}`

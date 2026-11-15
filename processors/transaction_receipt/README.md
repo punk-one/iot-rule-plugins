@@ -1,0 +1,3 @@
+# transaction-receipt
+
+Server node: verifies v1 delivery scope/HMAC/payload hash, resolves SQL parameters from delivery.* / payload.*, then calls a bound SQL write. Emits a separately signed committed receipt only after the Connector explicitly returns committed=true (after transaction commit). Configured SQL must be idempotent using delivery.id as a unique key; a crash after commit/before receipt can replay the transaction. Preserve incoming SDK metadata so a separate server buffer may be ACKed by its MQTT receipt uplink. No arbitrary event field can impersonate the Connector commit response. Current families: SQL Server/MySQL/SQLite; PostgreSQL adapter is pending. This is trusted configured SQL, not a query sandbox.

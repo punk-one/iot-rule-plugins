@@ -50,7 +50,7 @@ manifest 与 `PluginInfo`、module 路径和入口模式由仓库测试统一校
 ## 发布产物
 
 `dist/plugins/release-manifest.json` 记录 commit、Go 版本、SDK 版本、artifact、SHA-256、
-SBOM 和可选签名。配置 `PLUGIN_SIGNING_KEY` 后使用 `cosign sign-blob` 生成 `.sig`；
+SBOM 和可选签名。配置 `PLUGIN_SIGNING_KEY` 后使用 `cosign sign-blob` 生成 `.sigstore.json` bundle（Cosign 3）；
 设置 `PLUGIN_REQUIRE_SIGNATURE=1` 可让缺少签名直接导致构建失败。
 
 `release-plugins.txt` 选择本次需要发布的插件，原生 AMD64/ARM64 分别验收。
@@ -67,3 +67,11 @@ SBOM 和可选签名。配置 `PLUGIN_SIGNING_KEY` 后使用 `cosign sign-blob` 
 官方插件采用 [GNU Affero General Public License v3.0 only](LICENSE)（`AGPL-3.0-only`）。
 修改后的插件通过网络向用户提供服务时，可能触发 AGPL 第 13 条规定的对应源代码提供义务。
 AGPL 允许商业使用，但不授予商标权，也不涵盖需要单独取得许可的厂商库。
+
+## 下一阶段开发
+
+新增 96 个开发预览模块，详情见[插件清单](docs/PLUGIN_CATALOG.md)、[开发规划](docs/PLUGIN_DEVELOPMENT_ROADMAP.zh-CN.md)和[实施状态](docs/PLUGIN_DEVELOPMENT_STATUS.zh-CN.md)。规划未全部完成，未验收能力不作为稳定版发布。
+
+## M0–M5 软件交付
+
+当前120独立模块，含96个开发预览。参见 [插件目录](docs/PLUGIN_CATALOG.md)、[开发台账](docs/PLUGIN_DEVELOPMENT_STATUS.zh-CN.md) 和 [验证与生产放行项](docs/DEVELOPMENT_VERIFICATION_2026-11-14.zh-CN.md)。SDK保持v1.0.0；CI和发布只上传明确选择的插件。

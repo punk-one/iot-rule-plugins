@@ -1,0 +1,10 @@
+{
+  "id": "demo-mc",
+  "plugin_id": "connect-mc",
+  "enabled": true,
+  "connection": {
+    "host": "127.0.0.1",
+    "port": 15000,
+    "mode": "3e_binary"
+  }
+}

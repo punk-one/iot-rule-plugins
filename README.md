@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-This repository contains 24 official plugins for IoT Rule Engine, with independent semantic versions
+This repository contains 24 existing plugins and 96 development-preview modules for IoT Rule Engine, with independent semantic versions
 and the stable SDK v1.0.0 contract. Every plugin is an
 independent directory, Go module, dependency graph, manifest, and executable artifact.
 
@@ -108,3 +108,11 @@ The official plugins are licensed under the
 [GNU Affero General Public License v3.0 only](LICENSE) (`AGPL-3.0-only`). Modified plugins offered to users
 over a network may trigger section 13's Corresponding Source obligations. The AGPL permits commercial use;
 it does not grant trademark rights or rights to separately supplied vendor libraries.
+
+## Development roadmap and previews
+
+See [implementation catalog](docs/PLUGIN_CATALOG.md), [roadmap](docs/PLUGIN_DEVELOPMENT_ROADMAP.zh-CN.md) and [implementation status](docs/PLUGIN_DEVELOPMENT_STATUS.zh-CN.md). New modules are not yet a stable signed release; their unsupported modes and hardware acceptance limits are explicit.
+
+## M0–M5 delivery
+
+The 120 independent plugin modules include 96 development previews. See the [catalog](docs/PLUGIN_CATALOG.md), [delivery ledger](docs/PLUGIN_DEVELOPMENT_STATUS.zh-CN.md) and [verification/production gates](docs/DEVELOPMENT_VERIFICATION_2026-11-14.zh-CN.md). Software validation does not certify hardware models, ARM runtime or 72-hour operation. SDK stays v1.0.0; CI and releases upload only explicitly selected plugins.

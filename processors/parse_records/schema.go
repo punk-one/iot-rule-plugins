@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type": "object", "properties": {"input_field": {"type": "string", "minLength": 1, "default": "raw"}, "output_field": {"type": "string", "minLength": 1, "default": "parsed"}, "max_bytes": {"type": "integer", "minimum": 1, "maximum": 8388608, "default": 1048576}, "format": {"type": "string", "enum": ["json", "csv", "xml"]}, "encoding": {"type": "string", "enum": ["utf8", "base64"], "default": "utf8"}, "separator": {"type": "string", "minLength": 1, "maxLength": 1, "default": ","}, "header": {"type": "boolean", "default": true}, "max_records": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 4096}}, "required": ["format"], "additionalProperties": false}`

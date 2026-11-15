@@ -1,0 +1,45 @@
+{
+  "secret": "synthetic-key-for-test-only-00000000",
+  "envelope": {
+    "delivery": {
+      "version": 1,
+      "id": "c191234870d28c2217b89c65406a84ec66e582e44088d0dfe4dc9a3086279980",
+      "origin_instance": "edge-001",
+      "rule_id": "rule-001",
+      "buffer_node_id": "buffer-001",
+      "record_id": "record-001",
+      "event_id": "event-001",
+      "key_id": "v1",
+      "payload_sha256": "5ce1ac5c736a4192099b6b1476e285b264bbc21c44b249601c4be78295f4fac3",
+      "issued_at": 1794614400000,
+      "signature": "58666aca1dd306b5b50be4126cb1dc07e0f4aaf1b6ecac404a4d7ac5cadc6790"
+    },
+    "payload": {
+      "data": {
+        "count": "9007199254740993",
+        "temperature": 12.5
+      },
+      "device_code": "synthetic",
+      "time": 1794614400000
+    }
+  },
+  "receipt": {
+    "delivery": {
+      "version": 1,
+      "id": "c191234870d28c2217b89c65406a84ec66e582e44088d0dfe4dc9a3086279980",
+      "origin_instance": "edge-001",
+      "rule_id": "rule-001",
+      "buffer_node_id": "buffer-001",
+      "record_id": "record-001",
+      "event_id": "event-001",
+      "key_id": "v1",
+      "payload_sha256": "5ce1ac5c736a4192099b6b1476e285b264bbc21c44b249601c4be78295f4fac3",
+      "issued_at": 1794614400000,
+      "signature": "58666aca1dd306b5b50be4126cb1dc07e0f4aaf1b6ecac404a4d7ac5cadc6790"
+    },
+    "committer": "server-001",
+    "committed_at": 1794614401000,
+    "status": "committed",
+    "signature": "4b91a4c3c43b946f8f01cb307b7e63d764ff018d49f51ae7ecf76f71e16f376d"
+  }
+}

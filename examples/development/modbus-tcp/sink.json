@@ -1,0 +1,13 @@
+{
+  "connector_ref": "demo-modbus",
+  "device_code": "machine-001",
+  "points": [
+    {
+      "name": "demo_coils",
+      "area": "coil",
+      "address": 10,
+      "valueType": "BoolArray",
+      "count": 3
+    }
+  ]
+}

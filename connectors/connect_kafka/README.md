@@ -1,0 +1,25 @@
+# Kafka Connector
+
+```json
+{"brokers":["kafka.example.invalid:9093"],"topics":["telemetry"],"group_prefix":"iot-rule.","tls":true,"username":"collector","password":"<protected-secret>","sasl":"scram-sha-256","timeout_ms":5000,"max_message_bytes":65536,"allow_write":false}
+```
+
+One long-lived logical resource owns one lazy shared producer client and at most eight native consumer clients. A Kafka consumer group has independent membership and offsets, so different groups need their own protocol clients/connections; this does not claim one physical TCP connection for every Kafka consumer. At most8 resources,8 seeds/resource,8 allowed topics/resource. Stopping a node closes only its consumer; resource stop/delete cancels all of its clients and producer. One plugin process hosts all resources.
+
+System/custom ca_pem roots, verified hostnames and TLS>=1.2; no skip-verify. Explicit PLAIN/SCRAM-SHA-256/SCRAM-SHA-512, credentials always require TLS. Plaintext without credentials is allowed only for literal-loopback test brokers, including broker addresses returned by metadata discovery. Production network policy must permit the cluster's advertised broker addresses. Topic creation, arbitrary admin commands and regular-expression subscriptions are not offered. Topics use alphanumeric first character, then ASCII letters/digits/dot/underscore/hyphen, maximum249 chars; groups maximum128 chars and must start with configured group_prefix plus a nonempty suffix.
+
+## Publish
+
+Write target `publish`: `{topic:"telemetry",key:"stable-event-id",value:"<base64>"}`. Requires allow_write, allowed topic, key1..1024bytes and value<=max_message_bytes (1MiB hard ceiling). Producer requests all-ISR acknowledgments, no compression, one serialized publish/resource, record retries0 and idempotent producer mode disabled. Metadata/control requests may retry with bounded count/backoff; failed/unknown record sends are not transparently replayed. Entire caller request includes queue time under a finite50–30000ms deadline. Output `{received:true,partition:0,offset:"123"}` only after the broker confirms. Offset is a decimal string. Broker all-ISR receipt is subject to the actual broker replication/min.insync.replicas policy, not business consumption. Stable key does not deduplicate repeated Kafka log records; use application IDs/durable deduplication.
+
+## Consume
+
+OpenStream target is an allowed topic; payload `{group_id:"iot-rule.gateway-a.telemetry",reset:"earliest"}`. Explicit group IDs are stable across restart: same group load-balances, different groups fan out. reset earliest/latest applies only when no committed offset is available, not on every reconnect. One initial credit, max buffer1, max deliver batch1 and fail_session policy are required.
+
+Native auto-commit disabled. Receive polls one record and pauses fetching that topic while it is pending. Output bytes + topic + base64-encoded key (metadata key_encoding=base64), partition/offset decimal strings, producer timestamp and stream-local sequence. ACK must match the pending delivery ID and grant exactly1 credit; synchronously commits that record's next offset, then permits rebalance/resumes fetch. Credit grants cannot bypass commit. NACK supports only requeue, closing the consumer without committing; no silent poison-message discard. Unacked lease30s closes an abandoned consumer and allows replay; stream IDs are unique per generation. Close interrupts polling, allows rebalance, attempts a bounded500ms leave and force-closes remaining native work. Source handoff/commit gaps can produce duplicates or loss without a coordinated persistent inbox; this stream API alone is not that inbox.
+
+Bounds: one concurrent native fetch/client, fetch response1MiB, broker wire response2MiB, decompressed batch1MiB (native guard before expansion), producer batch/value budget and maximum logical client count. Native topic/partition metadata and internal client allocations still have overhead; these are finite packet/batch limits, not a promise of total heap size=max_message_bytes. Oversized or poison records fail without offset commit; repair producer format/limit or use a reviewed dead-letter workflow. Offline retries back off, and stopped resources do not retain clients.
+
+New independent SDK v1.0.0 module, plugin version1.0.0 development preview. Requires the Go1.27.4 security build baseline. franz-go v1.22.3/kmsg v1.15.1 are BSD-3-Clause, pure Go; no JVM, Kafka server, vendor native library or CGO runtime. kfake is a separate pinned test-only module; it is not imported by production implementation or linked into the plugin artifact. Preserve its test notices and the production codec/SASL notices in the SBOM.
+
+Tests use actual Kafka wire protocol against upstream kfake, including consumers/groups, offset replay, shared-resource isolation, TLS plus PLAIN/SCRAM-SHA-256/SCRAM-SHA-512, rejection of an untrusted CA and a real gzip expansion beyond the configured budget. This does not certify a real Apache Kafka deployment, every broker version, ACL topology, failover, ARM runtime or long-duration operation. No exactly-once transaction or business commit guarantee.

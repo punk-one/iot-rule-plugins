@@ -1,0 +1,13 @@
+{
+  "points": [
+    {
+      "name": "temperature",
+      "scale": 0.1,
+      "precision": 2,
+      "min": 0,
+      "max": 200,
+      "outOfRangePolicy": "default",
+      "defaultValue": 0
+    }
+  ]
+}

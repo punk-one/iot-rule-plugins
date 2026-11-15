@@ -18,7 +18,7 @@ func (p *TransformPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "transform",
 		Name:        "Transform",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Transform payloads using copy/object/template mappings with JSONPath and Go template support",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "transform",

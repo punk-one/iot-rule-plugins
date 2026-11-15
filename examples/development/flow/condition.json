@@ -1,0 +1,15 @@
+{
+  "mode": "all",
+  "conditions": [
+    {
+      "path": "quality.temperature",
+      "op": "eq",
+      "value": "good"
+    },
+    {
+      "path": "data.temperature",
+      "op": "gt",
+      "value": 80
+    }
+  ]
+}

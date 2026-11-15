@@ -31,7 +31,7 @@ func (p *TimescaleSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-timeseries-timescaledb",
 		Name:        "Sink Timeseries TimescaleDB",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Write row payloads to TimescaleDB through connector_ref",
 		Type:        sdk.PluginTypeSink,
 		Category:    "storage",

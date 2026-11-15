@@ -23,7 +23,7 @@ func (p *ChangeDetectPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "detect-change",
 		Name:        "Detect Change",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Description: "Detect changes in a single field based on group_by keys (delta/percent/trend)",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "stateful",

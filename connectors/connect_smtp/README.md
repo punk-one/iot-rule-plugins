@@ -1,0 +1,3 @@
+# connect-smtp
+
+SMTP submission, verified STARTTLS or implicit TLS1.2+, bounded deadlines including serialization, package8-session limit. Resource owns sender/auth and exact recipient-domain allowlist; remote cleartext/auth is forbidden. Loopback anonymous none mode exists only for local fixtures. Subject/address header injection is rejected, UTF-8 plain body is base64 MIME encoded, max10 recipients/64KiB body. No transparent retry. Successful DATA reply is SMTP server receipt, not recipient delivery or business commit; partial/unknown outcomes require reconciliation. No OAuth/HTML/attachments, inbound mail or final delivery receipt claim. [Go SMTP API](https://pkg.go.dev/net/smtp).

@@ -1,0 +1,13 @@
+# Test-only environment used for the 2026-11-14 interoperability run.
+aiofiles==25.1.0
+aiosqlite==0.22.1
+asyncua==1.1.8
+cffi==2.1.1
+cryptography==50.0.2
+pycparser==3.12
+pyOpenSSL==26.4.0
+python-dateutil==4.0.0
+pytz==2026.6
+sortedcontainers==2.4.0
+typing_extensions==4.16.0
+tzdata==2026.6

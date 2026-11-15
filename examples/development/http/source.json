@@ -1,0 +1,6 @@
+{
+  "connector_ref": "demo-http",
+  "device_code": "machine-001",
+  "path": "/telemetry",
+  "interval_ms": 5000
+}

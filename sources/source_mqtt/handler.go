@@ -243,10 +243,10 @@ func (m *MQTTSource) publishMessage(message mqttInboundMessage) error {
 }
 
 func (m *MQTTSource) publishStreamMessage(message sdk.StreamMessage) error {
-	return m.publishPayload(message.Topic, message.RawPayload)
+	return m.publishPayload(message.Topic, message.RawPayload, message.Metadata)
 }
 
-func (m *MQTTSource) publishPayload(topic string, payload []byte) error {
+func (m *MQTTSource) publishPayload(topic string, payload []byte, transport ...map[string]string) error {
 	decodedPayload, err := m.decodePayload(payload)
 	if err != nil {
 		return err
@@ -263,6 +263,14 @@ func (m *MQTTSource) publishPayload(topic string, payload []byte) error {
 		sdk.SetTraceID(&event, uuid.New().String())
 	}
 
+	if len(transport) > 0 {
+		if value := transport[0]["mqtt_overflow_total"]; value != "" {
+			event.Metadata["mqtt_overflow_total"] = value
+			if value != "0" {
+				event.Metadata["mqtt_transport_quality"] = "uncertain:overflow"
+			}
+		}
+	}
 	m.applyExtractRules(&event, topic)
 
 	if err := m.ctx.Emitter().Publish(event); err != nil {

@@ -33,7 +33,7 @@ type JavaScriptTransformProcessor struct {
 
 func (p *JavaScriptTransformProcessor) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
-		ID: "javascript-transform", Name: "JavaScript Transform", Version: "1.0.0",
+		ID: "javascript-transform", Name: "JavaScript Transform", Version: "1.0.1",
 		Description: "Transform JSON-compatible events with isolated, time-bounded JavaScript",
 		Type:        sdk.PluginTypeProcessor, Category: "transform",
 		Capabilities: sdk.PluginCapabilities{InputPorts: 1, OutputPorts: 1, ConfigSchema: configSchema},

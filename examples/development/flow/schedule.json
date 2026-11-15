@@ -1,0 +1,9 @@
+{
+  "cron": "0 8 * * *",
+  "timezone": "Asia/Shanghai",
+  "on_start": false,
+  "payload": {
+    "device_code": "machine-001",
+    "command": "daily-summary"
+  }
+}

@@ -1,0 +1,3 @@
+# connect-influxdb
+
+InfluxDB OSS 2.x API only: POST /api/v2/write with millisecond precision, POST /api/v2/query with parameterized Flux and bounded CSV rows. Token auth requires HTTPS except loopback tests. No redirect to another origin; no automatic write retry. HTTP success means this server accepted the write, not a guarantee about downstream replicas. A failure may include partial writes. 1.x InfluxQL, 3.x SQL and Cloud asynchronous delivery are not claimed. Query cells remain strings to preserve exact integers. Configure server-side query range/limit; over-limit output fails rather than silently truncating. [Official API](https://docs.influxdata.com/influxdb/v2/api/quick-start/).

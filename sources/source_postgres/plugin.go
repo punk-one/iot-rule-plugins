@@ -24,7 +24,7 @@ func (s *PostgresSource) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-relational-postgres",
 		Name:        "Source Relational PostgreSQL",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSource,
 		Description: "Poll PostgreSQL through connector_ref and emit row events",
 		Category:    "database",

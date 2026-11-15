@@ -2,12 +2,12 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -15,13 +15,20 @@ import (
 )
 
 type mqttConnector struct {
-	mu        sync.Mutex
-	resources map[string]*mqttResource
-	closed    bool
-	newClient func(*mqtt.ClientOptions) mqtt.Client
+	bufferedBytes atomic.Int64
+	mu            sync.Mutex
+	resources     map[string]*mqttResource
+	closed        bool
+	newClient     func(*mqtt.ClientOptions) mqtt.Client
 }
 
 type mqttResource struct {
+	owner           *mqttConnector
+	bufferedBytes   atomic.Int64
+	dropped         atomic.Uint64
+	retired         atomic.Bool
+	orphans         []mqttInboundMessage
+	subscriptionMu  sync.Mutex
 	resource        sdk.ConnectorResource
 	cfg             connectionConfig
 	client          mqtt.Client
@@ -40,9 +47,11 @@ type mqttBinding struct {
 }
 
 type mqttSubscription struct {
-	qos      byte
-	tokens   map[string]struct{}
-	sessions map[string]struct{}
+	subscribedClient mqtt.Client
+	subscribedQoS    byte
+	qos              byte
+	tokens           map[string]struct{}
+	sessions         map[string]struct{}
 }
 
 type mqttInboundMessage struct {
@@ -64,7 +73,7 @@ func (c *mqttConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-mqtt",
 		Name:        "Connector MQTT",
-		Version:     "1.0.2",
+		Version:     "1.0.3",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared MQTT connector for source and sink plugins",
 		Category:    "connector",
@@ -95,8 +104,13 @@ func (c *mqttConnector) CreateResource(resource sdk.ConnectorResource) (string, 
 		c.mu.Unlock()
 		return "", fmt.Errorf("connector stopped")
 	}
+	if len(c.resources) >= 64 && c.resources[handle] == nil {
+		c.mu.Unlock()
+		return "", fmt.Errorf("MQTT resource limit reached")
+	}
 	current := c.resources[handle]
 	c.resources[handle] = &mqttResource{
+		owner:         c,
 		resource:      resource,
 		cfg:           cfg,
 		bindings:      make(map[string]*mqttBinding),
@@ -207,6 +221,7 @@ func (c *mqttConnector) Stop() error {
 }
 
 func closeMQTTResource(resource *mqttResource) {
+	resource.retired.Store(true)
 	// Retire first so an in-flight dial cannot publish a new physical session.
 	resource.mu.Lock()
 	resource.closed = true
@@ -221,7 +236,27 @@ func closeMQTTResource(resource *mqttResource) {
 	for _, session := range resource.sessions {
 		sessions = append(sessions, session)
 	}
+	bindings := make([]*mqttBinding, 0, len(resource.bindings))
+	for _, binding := range resource.bindings {
+		bindings = append(bindings, binding)
+	}
+	orphans := resource.orphans
+	resource.orphans = nil
 	resource.mu.Unlock()
+	for _, message := range orphans {
+		resource.release(inboundCost(message))
+	}
+	for _, binding := range bindings {
+		for {
+			select {
+			case message := <-binding.inbox:
+				resource.release(inboundCost(message))
+			default:
+				goto drained
+			}
+		}
+	drained:
+	}
 	for _, session := range sessions {
 		session.close()
 	}
@@ -251,7 +286,7 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 	if mqttClientReady(resource.client) && !resource.connectionExpired() {
 		client := resource.client
 		resource.mu.Unlock()
-		return client, nil
+		return client, c.resubscribeAll(resource, client)
 	}
 	if mqttClientReady(resource.client) && resource.connectionExpired() {
 		resource.client.Disconnect(250)
@@ -263,6 +298,10 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(resource.cfg.Broker)
 	opts.SetClientID(stableClientID(resource))
+	opts.SetCleanSession(resource.cfg.cleanSession())
+	opts.SetResumeSubs(!resource.cfg.cleanSession())
+	opts.SetProtocolVersion(4)
+	opts.SetDefaultPublishHandler(c.makeMessageHandler(resource, ""))
 	opts.SetAutoReconnect(false)
 	opts.SetConnectRetry(false)
 	opts.SetConnectTimeout(time.Duration(resource.cfg.ConnectTimeoutSec) * time.Second)
@@ -277,9 +316,6 @@ func (c *mqttConnector) ensureConnected(resource *mqttResource) (mqtt.Client, er
 			resource.lastConnectedAt = time.Time{}
 		}
 		resource.mu.Unlock()
-	})
-	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		_ = c.resubscribeAll(resource, client)
 	})
 
 	newClient := c.newClient
@@ -328,24 +364,34 @@ func (r *mqttResource) connectionExpired() bool {
 }
 
 func (c *mqttConnector) resubscribeAll(resource *mqttResource, client mqtt.Client) error {
-	type subscriptionState struct {
+	resource.subscriptionMu.Lock()
+	defer resource.subscriptionMu.Unlock()
+	type intent struct {
 		topic string
 		qos   byte
+		state *mqttSubscription
 	}
-
 	resource.mu.Lock()
-	subscriptions := make([]subscriptionState, 0, len(resource.subscriptions))
+	intents := []intent{}
 	for topic, state := range resource.subscriptions {
-		subscriptions = append(subscriptions, subscriptionState{topic: topic, qos: state.qos})
+		if state.subscribedClient != client || state.subscribedQoS != state.qos {
+			intents = append(intents, intent{topic, state.qos, state})
+		}
 	}
 	resource.mu.Unlock()
-
-	for _, state := range subscriptions {
-		effectiveTopic := resource.effectiveTopic(state.topic)
-		token := client.Subscribe(effectiveTopic, state.qos, c.makeMessageHandler(resource, state.topic))
-		if token.Wait() && token.Error() != nil {
-			return token.Error()
+	for _, i := range intents {
+		if resource.retired.Load() {
+			return fmt.Errorf("MQTT resource retired")
 		}
+		if err := waitMQTT(client.Subscribe(resource.effectiveTopic(i.topic), i.qos, c.makeMessageHandler(resource, i.topic))); err != nil {
+			return err
+		}
+		resource.mu.Lock()
+		if resource.subscriptions[i.topic] == i.state && i.state.qos == i.qos {
+			i.state.subscribedClient = client
+			i.state.subscribedQoS = i.qos
+		}
+		resource.mu.Unlock()
 	}
 	return nil
 }
@@ -359,43 +405,7 @@ func (r *mqttResource) effectiveTopic(topic string) string {
 }
 
 func (c *mqttConnector) makeMessageHandler(resource *mqttResource, subscription string) mqtt.MessageHandler {
-	return func(client mqtt.Client, msg mqtt.Message) {
-		resource.mu.Lock()
-		state := resource.subscriptions[subscription]
-		targets := make([]*mqttBinding, 0)
-		if state != nil {
-			targets = make([]*mqttBinding, 0, len(state.tokens))
-			for token := range state.tokens {
-				if binding, ok := resource.bindings[token]; ok {
-					targets = append(targets, binding)
-				}
-			}
-		}
-		sessions := make([]*mqttConsumerSession, 0)
-		if state != nil {
-			sessions = make([]*mqttConsumerSession, 0, len(state.sessions))
-			for sessionID := range state.sessions {
-				if session, ok := resource.sessions[sessionID]; ok {
-					sessions = append(sessions, session)
-				}
-			}
-		}
-		resource.mu.Unlock()
-
-		inbound := mqttInboundMessage{
-			Topic:         msg.Topic(),
-			Subscription:  subscription,
-			PayloadBase64: base64.StdEncoding.EncodeToString(msg.Payload()),
-			ReceivedAt:    time.Now().Format(time.RFC3339Nano),
-			RawPayload:    append([]byte(nil), msg.Payload()...),
-		}
-		for _, binding := range targets {
-			enqueueInbound(binding.inbox, inbound)
-		}
-		for _, session := range sessions {
-			session.enqueue(inbound)
-		}
-	}
+	return func(client mqtt.Client, msg mqtt.Message) { c.message(resource, subscription, msg) }
 }
 
 func enqueueInbound(ch chan mqttInboundMessage, message mqttInboundMessage) {

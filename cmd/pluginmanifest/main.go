@@ -17,26 +17,28 @@ import (
 const requiredSDK = "github.com/punk-one/iot-rule-plugin-sdk@v1.0.0"
 
 type manifest struct {
-	SchemaVersion int    `json:"schema_version"`
-	ID            string `json:"id"`
-	Version       string `json:"version"`
-	Type          string `json:"type"`
-	SDK           string `json:"sdk"`
-	Module        string `json:"module"`
+	Requirements  *runtimeRequirements `json:"requirements,omitempty"`
+	SchemaVersion int                  `json:"schema_version"`
+	ID            string               `json:"id"`
+	Version       string               `json:"version"`
+	Type          string               `json:"type"`
+	SDK           string               `json:"sdk"`
+	Module        string               `json:"module"`
 }
 
 type releaseRecord struct {
-	OS        string `json:"os,omitempty"`
-	Arch      string `json:"arch,omitempty"`
-	ID        string `json:"id"`
-	Version   string `json:"version"`
-	Type      string `json:"type"`
-	SDK       string `json:"sdk"`
-	Module    string `json:"module"`
-	Artifact  string `json:"artifact"`
-	SHA256    string `json:"sha256"`
-	SBOM      string `json:"sbom"`
-	Signature string `json:"signature,omitempty"`
+	Requirements *runtimeRequirements `json:"requirements,omitempty"`
+	OS           string               `json:"os,omitempty"`
+	Arch         string               `json:"arch,omitempty"`
+	ID           string               `json:"id"`
+	Version      string               `json:"version"`
+	Type         string               `json:"type"`
+	SDK          string               `json:"sdk"`
+	Module       string               `json:"module"`
+	Artifact     string               `json:"artifact"`
+	SHA256       string               `json:"sha256"`
+	SBOM         string               `json:"sbom"`
+	Signature    string               `json:"signature,omitempty"`
 }
 
 type sbomDocument struct {
@@ -69,10 +71,20 @@ type releaseManifest struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fatal(errors.New("usage: pluginmanifest inspect|release ..."))
+		fatal(errors.New("usage: pluginmanifest inspect|release|sbom|supports-platform ..."))
 	}
 	var err error
 	switch os.Args[1] {
+	case "supports-platform":
+		if len(os.Args) != 4 {
+			err = errors.New("usage: pluginmanifest supports-platform <platforms.json> <os/arch[/variant]>")
+		} else {
+			var supported bool
+			supported, err = supportsPlatform(os.Args[2], os.Args[3])
+			if err == nil {
+				fmt.Println(supported)
+			}
+		}
 	case "inspect":
 		if len(os.Args) != 3 {
 			err = errors.New("usage: pluginmanifest inspect <plugin.json>")
@@ -120,6 +132,9 @@ func inspect(path string) error {
 }
 
 func validate(value manifest) error {
+	if err := validateRequirements(value.Requirements); err != nil {
+		return err
+	}
 	if value.SchemaVersion != 1 {
 		return fmt.Errorf("schema_version=%d, want 1", value.SchemaVersion)
 	}
@@ -166,6 +181,11 @@ func release(recordsPath, outputPath, repoRoot string) error {
 			Module: fields[4], Artifact: fields[5], SHA256: fields[6],
 			SBOM: fields[7], Signature: fields[8],
 		})
+		requirements, err := requirementsFor(repoRoot, fields[0])
+		if err != nil {
+			return err
+		}
+		result.Plugins[len(result.Plugins)-1].Requirements = requirements
 		if len(fields) == 11 {
 			result.Plugins[len(result.Plugins)-1].OS = fields[9]
 			result.Plugins[len(result.Plugins)-1].Arch = fields[10]

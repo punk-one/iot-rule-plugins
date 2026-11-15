@@ -1,0 +1,3 @@
+# batch-events
+
+Processing-time per-string-key batches. Input events are cloned; output {device_code,records:[event payloads],batch:{event_ids,count,start,end},time}. Stable batch ID hashes key and member IDs. Count or initial window deadline flushes, including correct rollover before a late event; limits apply to keys, records, single event and total retained bytes. Volatile state: stop discards pending inputs, failed output handoff is not durable. Place buffer-node after batching. Inputs with buffer_record_id are rejected because many input ACKs cannot safely be collapsed into one downstream ACK. This plugin does not implement a transactional queue or end-to-end exactly-once delivery.

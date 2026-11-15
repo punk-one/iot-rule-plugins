@@ -24,7 +24,7 @@ jobs:
           path: iot-rule-plugin-sdk
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version: '1.27.4'
           cache-dependency-path: |
             iot-rule-plugins/**/go.sum
             iot-rule-plugin-sdk/go.sum
@@ -34,9 +34,13 @@ jobs:
       - name: All independent modules
         working-directory: iot-rule-plugins
         run: ./scripts/test-plugins.sh
-      - name: Build release artifacts and SBOMs
+      - name: Build selected release artifacts and SBOMs
         working-directory: iot-rule-plugins
-        run: ./build-plugins.sh
+        shell: bash
+        run: |
+          selection="$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' release-plugins.txt)"
+          test -n "$selection"
+          PLUGINS_OVERRIDE="$selection" ./build-plugins.sh
       - uses: actions/upload-artifact@v4
         with:
           name: plugins-unsigned

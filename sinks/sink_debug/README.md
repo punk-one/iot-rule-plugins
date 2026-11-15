@@ -1,0 +1,3 @@
+# sink-debug
+
+Terminal debug branch, sampled 1/100 events and at most10 log entries/s by default. Default summary contains only event/trace IDs and payload field count. `include_values=true` requires an explicit `fields` path allowlist (16 maximum); only bounded scalar values are logged, containers are omitted. Names containing password/token/secret/credentials/auth/cookie/private-key markers are redacted, JSON escapes control characters. A non-secret field can still contain sensitive text: administrators must choose paths and log retention carefully. No full payload or arbitrary metadata dump; no durable buffer ACK. Buffered input is rejected. This Sink observes routed events, not every engine exception/status/completion; those need Engine event ingress support.

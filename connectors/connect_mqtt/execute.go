@@ -33,9 +33,11 @@ func (c *mqttConnector) executeMetadata(resource *mqttResource, req sdk.Connecto
 	switch req.Target {
 	case "", "info":
 		return buildJSONResponse(map[string]any{
-			"resource_id": resource.resource.ID,
-			"plugin_id":   c.Info().ID,
-			"broker":      resource.cfg.Broker,
+			"buffered_bytes":  resource.bufferedBytes.Load(),
+			"receive_dropped": resource.dropped.Load(),
+			"resource_id":     resource.resource.ID,
+			"plugin_id":       c.Info().ID,
+			"broker":          resource.cfg.Broker,
 			"supported_targets": []string{
 				"metadata/info",
 				"metadata/ping",
@@ -106,6 +108,7 @@ func (c *mqttConnector) executeRead(resource *mqttResource, req sdk.ConnectorReq
 
 	select {
 	case message := <-binding.inbox:
+		resource.release(inboundCost(message))
 		return buildJSONResponse(mqttReadResponse{Messages: []mqttInboundMessage{message}}, nil)
 	case <-ctx.Done():
 		return buildJSONResponse(mqttReadResponse{Messages: []mqttInboundMessage{}}, nil)
@@ -113,63 +116,57 @@ func (c *mqttConnector) executeRead(resource *mqttResource, req sdk.ConnectorReq
 }
 
 func (c *mqttConnector) ensureBinding(resource *mqttResource, token string, topics []string, qos byte, client mqtt.Client) error {
-	resource.mu.Lock()
-	defer resource.mu.Unlock()
-
-	binding, ok := resource.bindings[token]
-	if !ok {
-		binding = &mqttBinding{
-			topics: make(map[string]struct{}),
-			inbox:  make(chan mqttInboundMessage, resource.cfg.QueueSize),
+	if token == "" || len(token) > 512 || len(topics) < 1 || len(topics) > 64 || qos > 2 {
+		return fmt.Errorf("invalid MQTT read binding")
+	}
+	for _, topic := range topics {
+		if !validMQTTFilter(topic) {
+			return fmt.Errorf("invalid MQTT topic filter")
 		}
+	}
+	resource.mu.Lock()
+	if resource.closed {
+		resource.mu.Unlock()
+		return fmt.Errorf("resource closed")
+	}
+	binding := resource.bindings[token]
+	if binding == nil {
+		if len(resource.bindings) >= 32 {
+			resource.mu.Unlock()
+			return fmt.Errorf("MQTT legacy binding capacity exceeded")
+		}
+		binding = &mqttBinding{topics: map[string]struct{}{}, inbox: make(chan mqttInboundMessage, min(resource.cfg.QueueSize, 256))}
 		resource.bindings[token] = binding
 	}
-
 	for _, topic := range topics {
-		topic = strings.TrimSpace(topic)
-		if topic == "" {
-			continue
-		}
-		if _, ok := binding.topics[topic]; ok {
-			continue
-		}
-
 		binding.topics[topic] = struct{}{}
-		state, ok := resource.subscriptions[topic]
-		if !ok {
-			state = &mqttSubscription{
-				qos:      qos,
-				tokens:   make(map[string]struct{}),
-				sessions: make(map[string]struct{}),
-			}
-			effectiveTopic := resource.effectiveTopic(topic)
-			tokenResult := client.Subscribe(effectiveTopic, qos, c.makeMessageHandler(resource, topic))
-			if tokenResult.Wait() && tokenResult.Error() != nil {
-				delete(binding.topics, topic)
-				return tokenResult.Error()
-			}
+		state := resource.subscriptions[topic]
+		if state == nil {
+			state = &mqttSubscription{tokens: map[string]struct{}{}, sessions: map[string]struct{}{}}
 			resource.subscriptions[topic] = state
-		} else if qos > state.qos {
-			effectiveTopic := resource.effectiveTopic(topic)
-			tokenResult := client.Subscribe(effectiveTopic, qos, c.makeMessageHandler(resource, topic))
-			if tokenResult.Wait() && tokenResult.Error() != nil {
-				delete(binding.topics, topic)
-				return tokenResult.Error()
-			}
-			state.qos = qos
 		}
+		state.qos = max(state.qos, qos)
 		state.tokens[token] = struct{}{}
 	}
-
+	resource.mu.Unlock()
+	if err := c.resubscribeAll(resource, client); err != nil {
+		return err
+	}
+	for _, topic := range topics {
+		c.flushOrphans(resource, topic)
+	}
 	return nil
 }
 
 func (c *mqttConnector) executeWrite(resource *mqttResource, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
+	if len(req.Payload) > 1<<20 {
+		return sdk.ConnectorResponse{}, fmt.Errorf("MQTT publish request exceeds bound")
+	}
 	var payload mqttWritePayload
 	if err := json.Unmarshal(req.Payload, &payload); err != nil {
 		return sdk.ConnectorResponse{}, fmt.Errorf("parse write payload: %w", err)
 	}
-	if stringsTrim(payload.Topic) == "" {
+	if stringsTrim(payload.Topic) == "" || len(payload.Topic) > 1024 || strings.ContainsAny(payload.Topic, "+#\x00") || payload.QoS < 0 || payload.QoS > 2 {
 		return sdk.ConnectorResponse{}, fmt.Errorf("write.topic is required")
 	}
 
@@ -178,6 +175,9 @@ func (c *mqttConnector) executeWrite(resource *mqttResource, req sdk.ConnectorRe
 		return sdk.ConnectorResponse{}, fmt.Errorf("decode payload_base64: %w", err)
 	}
 
+	if len(data) > mqttPayloadLimit {
+		return sdk.ConnectorResponse{}, fmt.Errorf("MQTT publish payload exceeds 256 KiB")
+	}
 	client, err := c.ensureConnected(resource)
 	if err != nil {
 		return sdk.ConnectorResponse{}, err

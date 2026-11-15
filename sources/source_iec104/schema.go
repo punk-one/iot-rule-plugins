@@ -1,0 +1,3 @@
+package main
+
+const configSchema = `{"type":"object","required":["connector_ref","device_code","points"],"properties":{"connector_ref":{"type":"string","minLength":1},"device_code":{"type":"string","minLength":1},"interval_ms":{"type":"integer","minimum":1000,"maximum":86400000,"default":60000},"timeout_ms":{"type":"integer","minimum":50,"maximum":30000,"default":5000},"points":{"type":"array","minItems":1,"maxItems":1024,"items":{"type":"object","required":["name","ioa"],"properties":{"name":{"type":"string","minLength":1,"maxLength":128},"ioa":{"type":"integer","minimum":0,"maximum":16777215}},"additionalProperties":false}},"mode":{"type":"string","enum":["poll","stream"],"default":"poll"}},"additionalProperties":false}`

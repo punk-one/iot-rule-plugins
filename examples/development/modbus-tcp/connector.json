@@ -1,0 +1,11 @@
+{
+  "id": "demo-modbus",
+  "plugin_id": "connect-modbus",
+  "enabled": true,
+  "connection": {
+    "host": "127.0.0.1",
+    "port": 15020,
+    "unit_id": 1,
+    "mode": "tcp"
+  }
+}

@@ -30,7 +30,7 @@ func (s *S7Source) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "source-s7",
 		Name:        "S7 Source",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSource,
 		Description: "Poll multi-point Siemens S7 profiles, apply engineering-value policies, and emit telemetry events",
 		Capabilities: sdk.PluginCapabilities{

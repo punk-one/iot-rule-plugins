@@ -5,3 +5,7 @@ dist/
 *-latest
 /connectors/connect_tdengine/connect_tdengine
 /sinks/tdengine_sink/tdengine_sink
+
+# Python integration fixture caches
+__pycache__/
+*.pyc

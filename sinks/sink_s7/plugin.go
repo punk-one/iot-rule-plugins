@@ -30,7 +30,7 @@ func (s *S7Sink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-s7",
 		Name:        "S7 Sink",
-		Version:     "1.0.0",
+		Version:     "1.0.1",
 		Type:        sdk.PluginTypeSink,
 		Description: "Write event payload data fields to Siemens S7 PLC through connector_ref",
 		Capabilities: sdk.PluginCapabilities{

@@ -382,8 +382,11 @@ func TestSourcePollSendsProtocolOnlyPointsAndAppliesPolicies(t *testing.T) {
 	if got := data["temperature"]; got != 23.5 {
 		t.Fatalf("expected transformed value 23.5, got %v", got)
 	}
-	if len(emitter.events[0].Payload) != 3 {
-		t.Fatalf("expected exact device_code/data/time payload, got %+v", emitter.events[0].Payload)
+	if quality, ok := emitter.events[0].Payload["quality"].(map[string]string); !ok || quality["temperature"] != "good" {
+		t.Fatalf("internal per-point quality missing: %+v", emitter.events[0].Payload)
+	}
+	if len(emitter.events[0].Payload) != 4 {
+		t.Fatalf("expected internal device_code/data/quality/time payload; external mapping selects the three-field telemetry contract, got %+v", emitter.events[0].Payload)
 	}
 }
 

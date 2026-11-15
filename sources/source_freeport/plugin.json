@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "source-freeport",
+  "version": "1.0.0",
+  "type": "source",
+  "sdk": "github.com/punk-one/iot-rule-plugin-sdk@v1.0.0",
+  "module": "github.com/punk-one/iot-rule-plugins/sources/source_freeport",
+  "requirements": {
+    "schema_version": 1,
+    "connector_families": [
+      "serial",
+      "tcp",
+      "udp"
+    ]
+  }
+}
