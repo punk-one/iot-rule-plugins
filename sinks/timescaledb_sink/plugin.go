@@ -15,6 +15,7 @@ type TimescaleSink struct {
 	writeMode      writeMode
 	batchConfig    BatchConfig
 	ctx            sdk.RuntimeContext
+	columnsMu      sync.Mutex
 	tableColumns   map[string]map[string]bool
 	healthMu       sync.Mutex
 	healthy        bool
@@ -31,7 +32,7 @@ func (p *TimescaleSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-timeseries-timescaledb",
 		Name:        "Sink Timeseries TimescaleDB",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Description: "Write row payloads to TimescaleDB through connector_ref",
 		Type:        sdk.PluginTypeSink,
 		Category:    "storage",

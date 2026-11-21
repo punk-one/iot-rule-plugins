@@ -16,6 +16,12 @@ const configSchema = `{
       "x-ui-placeholder": "请定义 function main(input)",
       "default": "function main(input) {\n  console.log(\"JavaScript Transform input:\", JSON.stringify(input));\n\n  // ===== 在这里编写业务处理代码 =====\n  var outputPayload = {};\n  Object.keys(input.payload || {}).forEach(function (key) {\n    outputPayload[key] = input.payload[key];\n  });\n  outputPayload.processed_by = \"javascript-transform\";\n\n  return {\n    payload: outputPayload,\n    metadata: input.metadata,\n    timestamp_ms: input.timestamp_ms\n  };\n}"
     },
+    "script_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "title": "脚本版本",
+      "description": "可选的版本标签，随规则配置保存并用于排查日志"
+    },
     "timeout_ms": {
       "type": "integer",
       "minimum": 1,
@@ -28,8 +34,9 @@ const configSchema = `{
 }`
 
 type pluginConfig struct {
-	Code      string `json:"code"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	ScriptVersion string `json:"script_version,omitempty"`
+	Code          string `json:"code"`
+	TimeoutMS     int    `json:"timeout_ms,omitempty"`
 }
 
 type scriptInput struct {

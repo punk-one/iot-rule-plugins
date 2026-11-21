@@ -13,6 +13,7 @@ import (
 
 type postgresConnector struct {
 	mu        sync.Mutex
+	closed    bool
 	resources map[string]*postgresResource
 }
 
@@ -32,7 +33,7 @@ func (c *postgresConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-postgres",
 		Name:        "Connector PostgreSQL",
-		Version:     "1.0.1",
+		Version:     "1.0.3",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared PostgreSQL connector for source and sink plugins",
 		Category:    "connector",
@@ -55,33 +56,30 @@ func (c *postgresConnector) CreateResource(resource sdk.ConnectorResource) (stri
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if current, ok := c.resources[resource.ID]; ok {
-		if current.db != nil {
-			_ = current.db.Close()
-		}
+	if c.closed {
+		c.mu.Unlock()
+		return "", fmt.Errorf("connector stopped")
 	}
-	c.resources[resource.ID] = &postgresResource{
-		resource: resource,
-		cfg:      cfg,
-	}
+	previous := c.resources[resource.ID]
+	c.resources[resource.ID] = &postgresResource{resource: resource, cfg: cfg}
+	c.mu.Unlock()
+	closeResourcePool(previous)
 	return resource.ID, nil
 }
 
 func (c *postgresConnector) DestroyResource(providerHandle string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	resource := c.resources[providerHandle]
+	delete(c.resources, providerHandle)
+	c.mu.Unlock()
+	closeResourcePool(resource)
+	return nil
+}
 
-	resource, ok := c.resources[providerHandle]
-	if !ok {
-		return nil
-	}
-	if resource.db != nil {
+func closeResourcePool(resource *postgresResource) {
+	if resource != nil && resource.db != nil {
 		_ = resource.db.Close()
 	}
-	delete(c.resources, providerHandle)
-	return nil
 }
 
 func (c *postgresConnector) Execute(providerHandle string, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
@@ -136,13 +134,12 @@ func (c *postgresConnector) Probe(providerHandle string, req sdk.ConnectorReques
 
 func (c *postgresConnector) Stop() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for id, resource := range c.resources {
-		if resource.db != nil {
-			_ = resource.db.Close()
-		}
-		delete(c.resources, id)
+	c.closed = true
+	resources := c.resources
+	c.resources = make(map[string]*postgresResource)
+	c.mu.Unlock()
+	for _, resource := range resources {
+		closeResourcePool(resource)
 	}
 	return nil
 }
@@ -162,6 +159,9 @@ func (c *postgresConnector) openDB(resource *postgresResource) (*sql.DB, error) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.resources[resource.resource.ID] != resource {
+		return nil, fmt.Errorf("database resource retired")
+	}
 	if resource.db != nil {
 		return resource.db, nil
 	}
@@ -176,6 +176,34 @@ func (c *postgresConnector) openDB(resource *postgresResource) (*sql.DB, error) 
 
 	resource.db = db
 	return resource.db, nil
+}
+
+type postgresPoolDiagnostics struct {
+	Initialized        bool  `json:"initialized"`
+	MaxOpenConnections int   `json:"max_open_connections"`
+	OpenConnections    int   `json:"open_connections"`
+	InUse              int   `json:"in_use"`
+	Idle               int   `json:"idle"`
+	WaitCount          int64 `json:"wait_count"`
+	WaitDurationMS     int64 `json:"wait_duration_ms"`
+	MaxIdleClosed      int64 `json:"max_idle_closed"`
+	MaxLifetimeClosed  int64 `json:"max_lifetime_closed"`
+}
+
+func (c *postgresConnector) poolDiagnostics(resource *postgresResource) postgresPoolDiagnostics {
+	c.mu.Lock()
+	db := resource.db
+	c.mu.Unlock()
+	if db == nil {
+		return postgresPoolDiagnostics{MaxOpenConnections: resource.cfg.MaxOpenConns}
+	}
+	stats := db.Stats()
+	return postgresPoolDiagnostics{
+		Initialized: true, MaxOpenConnections: stats.MaxOpenConnections,
+		OpenConnections: stats.OpenConnections, InUse: stats.InUse, Idle: stats.Idle,
+		WaitCount: stats.WaitCount, WaitDurationMS: stats.WaitDuration.Milliseconds(),
+		MaxIdleClosed: stats.MaxIdleClosed, MaxLifetimeClosed: stats.MaxLifetimeClosed,
+	}
 }
 
 func buildJSONResponse(payload any, metadata map[string]string) (sdk.ConnectorResponse, error) {

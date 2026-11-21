@@ -74,6 +74,7 @@ func (c *redisConnector) executeMetadata(resource *redisResource, req sdk.Connec
 			"driver":      "redis",
 			"database":    resource.cfg.DB,
 			"addr":        resource.cfg.Addr,
+			"pool":        resource.poolInfo(),
 			"supported_targets": []string{
 				"metadata/info",
 				"metadata/ping",
@@ -152,11 +153,8 @@ func (c *redisConnector) executeReadStream(resource *redisResource, req sdk.Conn
 	if payload.Stream == "" {
 		return sdk.ConnectorResponse{}, fmt.Errorf("read.stream is required")
 	}
-	if payload.Count <= 0 {
-		payload.Count = 1
-	}
-	if payload.BlockTimeoutMS <= 0 {
-		payload.BlockTimeoutMS = 1000
+	if err := normalizeRedisReadLimits(&payload); err != nil {
+		return sdk.ConnectorResponse{}, err
 	}
 
 	token := stringsTrim(req.ResourceToken)
@@ -187,9 +185,13 @@ func (c *redisConnector) executeReadStream(resource *redisResource, req sdk.Conn
 	}
 
 	messages := make([]redisStreamMessage, 0)
+	lastIDs := make(map[string]string, len(streams))
 	for _, stream := range streams {
 		lastID := cursor
 		for _, message := range stream.Messages {
+			if len(messages) >= int(payload.Count) {
+				return sdk.ConnectorResponse{}, fmt.Errorf("Redis stream returned more than %d messages", payload.Count)
+			}
 			lastID = message.ID
 			messages = append(messages, redisStreamMessage{
 				Stream:     stream.Stream,
@@ -199,11 +201,18 @@ func (c *redisConnector) executeReadStream(resource *redisResource, req sdk.Conn
 			})
 		}
 		if lastID != cursor {
-			c.setCursor(resource, token, stream.Stream, lastID)
+			lastIDs[stream.Stream] = lastID
 		}
 	}
 
-	return buildJSONResponse(redisReadResponse{Messages: messages}, nil)
+	response, err := boundedRedisResponse(redisReadResponse{Messages: messages})
+	if err != nil {
+		return sdk.ConnectorResponse{}, err
+	}
+	for stream, lastID := range lastIDs {
+		c.setCursor(resource, token, stream, lastID)
+	}
+	return response, nil
 }
 
 func (c *redisConnector) executeWrite(resource *redisResource, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
@@ -275,6 +284,9 @@ func (c *redisConnector) executeWriteHash(resource *redisResource, req sdk.Conne
 		return sdk.ConnectorResponse{}, fmt.Errorf("write.fields is required")
 	}
 
+	if payload.TTLSeconds < 0 || payload.TTLSeconds > maxRedisTTLSeconds {
+		return sdk.ConnectorResponse{}, fmt.Errorf("hash_set.ttl_seconds is outside the supported range")
+	}
 	fields := normalizeRedisValues(payload.Fields)
 	if len(fields) == 0 {
 		return sdk.ConnectorResponse{}, fmt.Errorf("write.fields must contain at least one non-empty field")
@@ -308,7 +320,7 @@ func (c *redisConnector) executeWriteExpire(resource *redisResource, req sdk.Con
 		return sdk.ConnectorResponse{}, fmt.Errorf("parse expire payload: %w", err)
 	}
 	payload.Key = stringsTrim(payload.Key)
-	if payload.Key == "" || payload.TTLSeconds <= 0 {
+	if payload.Key == "" || payload.TTLSeconds <= 0 || payload.TTLSeconds > maxRedisTTLSeconds {
 		return sdk.ConnectorResponse{}, fmt.Errorf("expire.key and expire.ttl_seconds > 0 are required")
 	}
 
@@ -435,7 +447,10 @@ func (c *redisConnector) executeReadHash(resource *redisResource, req sdk.Connec
 			}
 			return sdk.ConnectorResponse{}, fmt.Errorf("hgetall key %s: %w", payload.Key, err)
 		}
-		return buildJSONResponse(redisHashReadResponse{Key: payload.Key, Fields: result}, nil)
+		if len(result) > maxRedisHashFields {
+			return sdk.ConnectorResponse{}, fmt.Errorf("Redis hash exceeds %d fields", maxRedisHashFields)
+		}
+		return boundedRedisResponse(redisHashReadResponse{Key: payload.Key, Fields: result})
 
 	case "hash_get":
 		payload.Field = stringsTrim(payload.Field)
@@ -449,7 +464,7 @@ func (c *redisConnector) executeReadHash(resource *redisResource, req sdk.Connec
 			}
 			return sdk.ConnectorResponse{}, fmt.Errorf("hget key %s field %s: %w", payload.Key, payload.Field, err)
 		}
-		return buildJSONResponse(redisHashReadResponse{Key: payload.Key, Fields: map[string]string{payload.Field: val}}, nil)
+		return boundedRedisResponse(redisHashReadResponse{Key: payload.Key, Fields: map[string]string{payload.Field: val}})
 
 	default:
 		return sdk.ConnectorResponse{}, fmt.Errorf("unsupported hash read target %q", req.Target)

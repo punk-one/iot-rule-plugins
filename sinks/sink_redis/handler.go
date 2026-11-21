@@ -18,8 +18,9 @@ type redisWritePayload struct {
 }
 
 type redisHashWritePayload struct {
-	Key    string         `json:"key"`
-	Fields map[string]any `json:"fields"`
+	Key        string         `json:"key"`
+	Fields     map[string]any `json:"fields"`
+	TTLSeconds int64          `json:"ttl_seconds,omitempty"`
 }
 
 var redisFieldSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
@@ -118,7 +119,7 @@ func (s *RedisSink) writeHash(e sdk.Event) error {
 		return redisSinkSkippable(fmt.Errorf("Redis Sink: no hash fields resolved"))
 	}
 
-	raw, err := json.Marshal(redisHashWritePayload{Key: key, Fields: fields})
+	raw, err := json.Marshal(redisHashWritePayload{Key: key, Fields: fields, TTLSeconds: s.cfg.Options.TTLSeconds})
 	if err != nil {
 		return redisSinkSkippable(err)
 	}

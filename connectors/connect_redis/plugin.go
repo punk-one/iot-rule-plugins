@@ -21,7 +21,7 @@ type redisClient interface {
 	HGet(ctx context.Context, key, field string) (string, error)
 	Close() error
 
-	// Combined HSet + Expire in a single pipeline RTT
+	// HSet followed by Expire in a watched transaction
 	HSetWithExpire(ctx context.Context, key string, values map[string]any, ttl time.Duration) error
 
 	// TTL management & key operations
@@ -52,11 +52,24 @@ func (c *goRedisClient) HSet(ctx context.Context, key string, values map[string]
 }
 
 func (c *goRedisClient) HSetWithExpire(ctx context.Context, key string, values map[string]any, ttl time.Duration) error {
-	pipe := c.client.TxPipeline()
-	pipe.HSet(ctx, key, values)
-	pipe.Expire(ctx, key, ttl)
-	_, err := pipe.Exec(ctx)
-	return err
+	return c.client.Watch(ctx, func(tx *redislib.Tx) error {
+		kind, err := tx.Type(ctx, key).Result()
+		if err != nil {
+			return err
+		}
+		if kind != "none" && kind != "hash" {
+			return fmt.Errorf("Redis hash TTL operation requires a hash or absent key")
+		}
+		// WATCH protects the type check against concurrent replacements. Redis
+		// transactions do not roll back individual command errors, so checking
+		// the type first avoids expiring a non-hash key on HSET WRONGTYPE.
+		_, err = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+			pipe.HSet(ctx, key, values)
+			pipe.Expire(ctx, key, ttl)
+			return nil
+		})
+		return err
+	}, key)
 }
 
 func (c *goRedisClient) HGetAll(ctx context.Context, key string) (map[string]string, error) {
@@ -83,22 +96,29 @@ func (c *goRedisClient) Delete(ctx context.Context, keys ...string) error {
 	return c.client.Del(ctx, keys...).Err()
 }
 
+func (c *goRedisClient) PoolStats() *redislib.PoolStats {
+	return c.client.PoolStats()
+}
+
 func (c *goRedisClient) Close() error {
 	return c.client.Close()
 }
 
 var newRedisClient = func(cfg connectionConfig) (redisClient, error) {
 	client := redislib.NewClient(&redislib.Options{
-		Addr:            cfg.Addr,
-		Username:        cfg.Username,
-		Password:        cfg.Password,
-		DB:              cfg.DB,
-		DialTimeout:     cfg.dialTimeout(),
-		ReadTimeout:     cfg.readTimeout(),
-		WriteTimeout:    cfg.writeTimeout(),
-		PoolSize:        cfg.PoolSize,
-		MinIdleConns:    cfg.MinIdleConns,
-		ConnMaxLifetime: cfg.connMaxLifetime(),
+		Addr:                  cfg.Addr,
+		Username:              cfg.Username,
+		Password:              cfg.Password,
+		DB:                    cfg.DB,
+		DialTimeout:           cfg.dialTimeout(),
+		ReadTimeout:           cfg.readTimeout(),
+		WriteTimeout:          cfg.writeTimeout(),
+		PoolSize:              cfg.PoolSize,
+		MaxActiveConns:        cfg.PoolSize,
+		MaxRetries:            -1,
+		ContextTimeoutEnabled: true,
+		MinIdleConns:          cfg.MinIdleConns,
+		ConnMaxLifetime:       cfg.connMaxLifetime(),
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.dialTimeout())
@@ -122,6 +142,7 @@ type redisResource struct {
 
 	mu       sync.Mutex
 	client   redisClient
+	closed   bool
 	bindings map[string]*redisBinding
 	sessions map[string]*redisStreamSession
 }
@@ -147,7 +168,7 @@ func (c *redisConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-redis",
 		Name:        "Connector Redis",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared Redis connector for stream and hash-based source/sink plugins",
 		Category:    "connector",
@@ -177,12 +198,7 @@ func (c *redisConnector) CreateResource(resource sdk.ConnectorResource) (string,
 	defer c.mu.Unlock()
 
 	if current, ok := c.resources[handle]; ok {
-		current.mu.Lock()
-		if current.client != nil {
-			_ = current.client.Close()
-			current.client = nil
-		}
-		current.mu.Unlock()
+		current.retire()
 	}
 
 	c.resources[handle] = &redisResource{
@@ -203,16 +219,7 @@ func (c *redisConnector) DestroyResource(providerHandle string) error {
 		return nil
 	}
 
-	resource.mu.Lock()
-	if resource.client != nil {
-		_ = resource.client.Close()
-		resource.client = nil
-	}
-	for _, session := range resource.sessions {
-		session.close()
-	}
-	resource.mu.Unlock()
-
+	resource.retire()
 	delete(c.resources, providerHandle)
 	return nil
 }
@@ -296,15 +303,42 @@ func (c *redisConnector) Stop() error {
 	defer c.mu.Unlock()
 
 	for id, resource := range c.resources {
-		resource.mu.Lock()
-		if resource.client != nil {
-			_ = resource.client.Close()
-			resource.client = nil
-		}
-		resource.mu.Unlock()
+		resource.retire()
 		delete(c.resources, id)
 	}
 	return nil
+}
+
+func (resource *redisResource) retire() {
+	resource.mu.Lock()
+	defer resource.mu.Unlock()
+	resource.closed = true
+	for id, session := range resource.sessions {
+		session.close()
+		delete(resource.sessions, id)
+	}
+	if resource.client != nil {
+		_ = resource.client.Close()
+		resource.client = nil
+	}
+}
+
+func (resource *redisResource) poolInfo() map[string]any {
+	resource.mu.Lock()
+	defer resource.mu.Unlock()
+	info := map[string]any{
+		"open":                   resource.client != nil,
+		"max_active_connections": resource.cfg.PoolSize,
+	}
+	if client, ok := resource.client.(interface{ PoolStats() *redislib.PoolStats }); ok {
+		stats := client.PoolStats()
+		info["connections"] = stats.TotalConns
+		info["idle_connections"] = stats.IdleConns
+		info["hits"] = stats.Hits
+		info["misses"] = stats.Misses
+		info["timeouts"] = stats.Timeouts
+	}
+	return info
 }
 
 func (c *redisConnector) getResource(providerHandle string) (*redisResource, error) {
@@ -322,6 +356,9 @@ func (c *redisConnector) openClient(resource *redisResource) (redisClient, error
 	resource.mu.Lock()
 	defer resource.mu.Unlock()
 
+	if resource.closed {
+		return nil, fmt.Errorf("Redis resource is closed")
+	}
 	if resource.client != nil {
 		return resource.client, nil
 	}

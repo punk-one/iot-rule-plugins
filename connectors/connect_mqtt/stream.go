@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ const (
 	mqttDefaultMaxBufferedMessages = 4096
 	mqttDefaultAckTimeoutMS        = 120000
 	mqttDefaultMaxDeliverBatch     = 64
+	mqttMaxWaitMS                  = 30_000
 )
 
 type mqttMessageDeque struct {
@@ -93,6 +96,7 @@ type mqttConsumerSession struct {
 	lastOverflowAt      time.Time
 	creditsStarvedSince time.Time
 	notifyCh            chan struct{}
+	done                chan struct{}
 }
 
 func newMQTTConsumerSession(id string, req sdk.StreamOpenRequest) *mqttConsumerSession {
@@ -122,6 +126,7 @@ func newMQTTConsumerSession(id string, req sdk.StreamOpenRequest) *mqttConsumerS
 		maxDeliverBatch:     maxDeliverBatch,
 		pending:             make(map[string]sdk.StreamMessage),
 		notifyCh:            make(chan struct{}, 1),
+		done:                make(chan struct{}),
 	}
 }
 
@@ -173,8 +178,7 @@ func (s *mqttConsumerSession) freeMessage(m sdk.StreamMessage) {
 func (s *mqttConsumerSession) dropOldestLocked() bool {
 	if s.overflowPolicy != "drop_oldest" {
 		if s.overflowPolicy == "fail_session" {
-			s.closed = true
-			s.signal()
+			s.closeLocked()
 		}
 		return false
 	}
@@ -227,6 +231,8 @@ func (s *mqttConsumerSession) receive(ctx context.Context, maxMessages int) ([]s
 		select {
 		case <-ctx.Done():
 			return nil, nil
+		case <-s.done:
+			return nil, fmt.Errorf("MQTT stream is closed or overflowed")
 		case <-notifyCh:
 		}
 	}
@@ -252,7 +258,7 @@ func (s *mqttConsumerSession) dispatchAvailableLocked(maxMessages int) []sdk.Str
 		s.updateStarvationLocked()
 		return nil
 	}
-	count := maxMessages
+	count := min(maxMessages, s.maxDeliverBatch)
 	if available < count {
 		count = available
 	}
@@ -271,6 +277,10 @@ func (s *mqttConsumerSession) dispatchAvailableLocked(maxMessages int) []sdk.Str
 		s.availableCredits--
 		message.Metadata["mqtt_overflow_total"] = fmt.Sprintf("%d", s.overflowTotal)
 		s.pending[message.DeliveryID] = message
+		// The caller serializes its response outside the session lock. A requeue
+		// may update the pending message before that serialization completes.
+		message.Metadata = maps.Clone(message.Metadata)
+		message.RawPayload = slices.Clone(message.RawPayload)
 		messages = append(messages, message)
 	}
 	s.updateStarvationLocked()
@@ -325,16 +335,23 @@ func (s *mqttConsumerSession) grantCredits(credits int) {
 
 func (s *mqttConsumerSession) close() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeLocked()
+}
+
+func (s *mqttConsumerSession) closeLocked() {
+	if s.closed {
+		return
+	}
 	s.closed = true
+	close(s.done)
 	if s.release != nil && s.residentBytes > 0 {
 		s.release(s.residentBytes)
 	}
 	s.residentBytes = 0
 	s.ready = mqttMessageDeque{}
 	s.requeue = mqttMessageDeque{}
-	s.pending = map[string]sdk.StreamMessage{}
-	s.mu.Unlock()
-	s.signal()
+	s.pending = nil
 }
 
 func (s *mqttConsumerSession) updateStarvationLocked() {
@@ -354,16 +371,19 @@ func (s *mqttConsumerSession) signal() {
 	}
 }
 
+func mqttReceiveWait(waitMS int) time.Duration {
+	if waitMS <= 0 {
+		return time.Second
+	}
+	return time.Duration(min(waitMS, mqttMaxWaitMS)) * time.Millisecond
+}
+
 func (c *mqttConnector) receiveConsumerStream(resource *mqttResource, req sdk.StreamReceiveRequest) (sdk.StreamReceiveResponse, error) {
 	session, err := c.getSession(resource, req.StreamID)
 	if err != nil {
 		return sdk.StreamReceiveResponse{}, err
 	}
-	timeout := time.Duration(req.WaitTimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), mqttReceiveWait(req.WaitTimeoutMS))
 	defer cancel()
 	if _, err = c.ensureConnected(resource); err != nil {
 		return sdk.StreamReceiveResponse{}, err

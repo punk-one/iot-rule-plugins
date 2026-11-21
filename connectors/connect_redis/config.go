@@ -116,6 +116,9 @@ func parseConnectionConfig(raw json.RawMessage) (connectionConfig, error) {
 	if cfg.MinIdleConns < 0 {
 		cfg.MinIdleConns = 0
 	}
+	if cfg.MinIdleConns > cfg.PoolSize {
+		return cfg, fmt.Errorf("connection.min_idle_conns cannot exceed pool_size")
+	}
 	if cfg.ConnMaxLifetimeSec < 0 {
 		cfg.ConnMaxLifetimeSec = 0
 	}

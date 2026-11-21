@@ -15,6 +15,7 @@ type PostgresSink struct {
 	writeMode      writeMode
 	batchConfig    BatchConfig
 	ctx            sdk.RuntimeContext
+	columnsMu      sync.Mutex
 	tableColumns   map[string]map[string]bool
 	healthMu       sync.Mutex
 	healthy        bool
@@ -31,7 +32,7 @@ func (p *PostgresSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-relational-postgres",
 		Name:        "Sink Relational PostgreSQL",
-		Version:     "1.0.1",
+		Version:     "1.0.3",
 		Description: "Write row payloads to PostgreSQL through connector_ref",
 		Type:        sdk.PluginTypeSink,
 		Category:    "storage",

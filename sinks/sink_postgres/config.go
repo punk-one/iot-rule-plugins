@@ -9,10 +9,11 @@ import (
 type Config struct {
 	ConnectorRef string `json:"connector_ref"`
 	Output       struct {
-		Table             string      `json:"table"`
-		AutoCreateColumns bool        `json:"auto_create_columns,omitempty"`
-		WriteMode         string      `json:"write_mode,omitempty"`
-		Batch             BatchConfig `json:"batch,omitempty"`
+		Table              string      `json:"table"`
+		AutoCreateColumns  bool        `json:"auto_create_columns,omitempty"`
+		WriteMode          string      `json:"write_mode,omitempty"`
+		ConflictKeyColumns []string    `json:"conflict_key_columns,omitempty"`
+		Batch              BatchConfig `json:"batch,omitempty"`
 	} `json:"output"`
 }
 
@@ -68,6 +69,14 @@ const postgresSinkConfigSchema = `{
           "enum": ["single", "batch"],
           "default": "single"
         },
+        "conflict_key_columns": {
+          "type": "array",
+          "title": "Conflict Key Columns",
+          "description": "Optional columns backed by a matching PostgreSQL unique constraint or index. Duplicate inserts for the same non-null key leave the original row unchanged.",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-zA-Z_][a-zA-Z0-9_$]*$"}
+        },
         "batch": {
           "type": "object",
           "title": "Batch Settings",
@@ -98,9 +107,16 @@ const postgresSinkConfigSchema = `{
 }`
 
 func (p *PostgresSink) validateConfig(raw []byte) error {
-	if err := json.Unmarshal(raw, &p.cfg); err != nil {
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
+	keys, err := normalizeSQLConflictKeys(cfg.Output.ConflictKeyColumns)
+	if err != nil {
+		return err
+	}
+	cfg.Output.ConflictKeyColumns = keys
+	p.cfg = cfg
 
 	p.cfg.ConnectorRef = strings.TrimSpace(p.cfg.ConnectorRef)
 	if p.cfg.ConnectorRef == "" {

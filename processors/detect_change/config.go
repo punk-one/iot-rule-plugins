@@ -19,6 +19,11 @@ const (
 	ModeChanged Mode = "changed" // 任意类型的值变化
 )
 
+const (
+	baselinePreviousSample = "previous_sample"
+	baselineLastChange     = "last_change"
+)
+
 // Direction 变化方向
 type Direction string
 
@@ -46,6 +51,7 @@ type Config struct {
 	} `json:"state"`
 	Process struct {
 		Detect struct {
+			Baseline  string   `json:"baseline,omitempty"`
 			Type      string   `json:"type"`                // 检测模式：delta | percent | trend
 			Value     float64  `json:"value"`               // 阈值（原 threshold）
 			Field     string   `json:"field"`               // 监控字段名
@@ -117,7 +123,14 @@ const detectChangeConfigSchema = `{
 							"description": "delta compares absolute difference, percent compares percentage change, trend checks monotonic movement, and changed checks whether values differ at all",
 							"enum": ["delta", "percent", "trend", "changed"]
 						},
-						"value": {
+	                    "baseline": {
+                      "type": "string",
+                      "title": "Deadband reference",
+                      "description": "For delta/percent, last_change keeps the baseline until a threshold is crossed. The default compares adjacent samples.",
+                      "enum": ["previous_sample", "last_change"],
+                      "default": "previous_sample"
+                    },
+					"value": {
 							"type": "number",
 							"title": "Threshold Value",
 							"description": "Numeric threshold for delta, percent, or trend modes. This field is ignored by changed mode"
@@ -230,6 +243,16 @@ func (p *ChangeDetectPlugin) validateConfig(cfg sdk.PluginConfig) error {
 		p.cfg.Process.Detect.Type != string(ModeTrend) &&
 		p.cfg.Process.Detect.Type != string(ModeChanged) {
 		return fmt.Errorf("process.detect.type must be 'delta', 'percent', 'trend', or 'changed'")
+	}
+	switch p.cfg.Process.Detect.Baseline {
+	case "", baselinePreviousSample:
+		p.cfg.Process.Detect.Baseline = baselinePreviousSample
+	case baselineLastChange:
+		if p.cfg.Process.Detect.Type != string(ModeDelta) && p.cfg.Process.Detect.Type != string(ModePercent) {
+			return fmt.Errorf("process.detect.baseline last_change requires delta or percent mode")
+		}
+	default:
+		return fmt.Errorf("process.detect.baseline must be previous_sample or last_change")
 	}
 	if p.cfg.Process.Detect.Type != string(ModeChanged) && len(p.cfg.Process.Detect.Fields) != 1 {
 		return fmt.Errorf("numeric detect mode requires exactly one field")

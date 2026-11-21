@@ -128,8 +128,32 @@ func (c *mqttConnector) message(resource *mqttResource, subscription string, msg
 		}
 	}
 }
+func (r *mqttResource) closeBinding(binding *mqttBinding) {
+    binding.mu.Lock()
+    defer binding.mu.Unlock()
+    if binding.closed {
+        return
+    }
+    binding.closed = true
+    close(binding.done)
+    // No callback can enqueue after the lock-protected retirement.
+    for {
+        select {
+        case message := <-binding.inbox:
+            r.release(inboundCost(message))
+        default:
+            return
+        }
+    }
+}
+
 func (c *mqttConnector) enqueueBinding(resource *mqttResource, binding *mqttBinding, m mqttInboundMessage) {
-	cost := inboundCost(m)
+    binding.mu.Lock()
+    defer binding.mu.Unlock()
+    if binding.closed {
+        return
+    }
+    cost := inboundCost(m)
 	if !resource.reserve(cost) {
 		resource.dropped.Add(1)
 		return

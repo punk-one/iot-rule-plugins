@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
@@ -11,11 +12,12 @@ import (
 // 功能：检测单个字段的变化（delta/percent/trend）
 type ChangeDetectPlugin struct {
 	sdk.BasePlugin
-	config   sdk.PluginConfig
-	cfg      Config
-	ctx      sdk.RuntimeContext // v1.2: 保存 RuntimeContext 供 OnEvent 使用
-	stateMgr sdk.StateManager   // v1.2: 保存 StateManager 供 OnEvent 使用
-	stateTTL time.Duration
+	config     sdk.PluginConfig
+	cfg        Config
+	ctx        sdk.RuntimeContext // v1.2: 保存 RuntimeContext 供 OnEvent 使用
+	stateMgr   sdk.StateManager   // v1.2: 保存 StateManager 供 OnEvent 使用
+	stateTTL   time.Duration
+	stateLocks [64]sync.Mutex
 }
 
 // Info 返回插件信息
@@ -23,8 +25,8 @@ func (p *ChangeDetectPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "detect-change",
 		Name:        "Detect Change",
-		Version:     "1.0.1",
-		Description: "Detect changes in a single field based on group_by keys (delta/percent/trend)",
+		Version:     "1.0.2",
+		Description: "Detect per-stream value changes with configurable deadband reference",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "stateful",
 		Capabilities: sdk.PluginCapabilities{

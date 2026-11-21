@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
@@ -43,6 +44,10 @@ func (p *TDengineSink) buildRowData(e sdk.Event) (string, string, map[string]int
 		return tableName, "", nil, nil
 	}
 
+	if !validSQLTableName(tableName) {
+		return "", "", nil, sdk.SkippableError(errors.New("invalid SQL table name"))
+	}
+
 	row := make(map[string]interface{}, len(e.Payload))
 	for key, value := range e.Payload {
 		normalized, err := normalizeColumnValue(value)
@@ -60,6 +65,12 @@ func (p *TDengineSink) buildRowData(e sdk.Event) (string, string, map[string]int
 		childTable = resolveChildTableName(p.childTableTemplate, row)
 	}
 
+	if err := validateSQLColumns(row); err != nil {
+		return tableName, "", nil, sdk.SkippableError(err)
+	}
+	if p.childTableTemplate != "" && !validSQLTableName(childTable) {
+		return tableName, "", nil, sdk.SkippableError(errors.New("invalid TDengine child table name"))
+	}
 	return tableName, childTable, row, nil
 }
 
@@ -70,9 +81,6 @@ func (p *TDengineSink) writeSingleRow(tableName, childTable string, row map[stri
 	}
 
 	query := p.buildInsertSQL(tableName, childTable, row)
-	p.ctx.Logger().Debug("tdengine sink write single row",
-		sdk.Field{Key: "sql", Value: query},
-	)
 	if err := p.connectorWrite(sqlWritePayload{SQL: query}); err != nil {
 		p.reportWriteFailure(err, "single")
 		return tdengineSinkRetryable(err)
@@ -136,12 +144,13 @@ func (p *TDengineSink) flushAllBuffered() error {
 	p.pendingBytes = make(map[string]int)
 	p.bufferMu.Unlock()
 
+	var failures []error
 	for tableName, rows := range pendingRows {
 		if err := p.flushRows(tableName, rows); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (p *TDengineSink) flushRows(tableName string, rows []queuedRow) error {
@@ -153,9 +162,9 @@ func (p *TDengineSink) flushRows(tableName string, rows []queuedRow) error {
 	}
 
 	// For supertable mode, each row may have a different child table, so we cannot batch them.
-	// Fall back to row-by-row insert.
+	// Choose individual inserts before any batch is sent.
 	if p.childTableTemplate != "" {
-		return p.fallbackRowByRow(tableName, rows)
+		return p.writeChildRows(tableName, rows)
 	}
 
 	rawRows := make([]map[string]interface{}, len(rows))
@@ -180,20 +189,18 @@ func (p *TDengineSink) flushRows(tableName string, rows []queuedRow) error {
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
 		tableName, stringsJoin(columnNames, ", "), stringsJoin(valueGroups, ", "))
-	p.ctx.Logger().Debug("tdengine sink flush batch rows",
-		sdk.Field{Key: "sql", Value: query},
-	)
-	if err := p.connectorWrite(sqlWritePayload{SQL: query}); err == nil {
-		p.ctx.Metrics().IncCounter("tdengine_sink.inserts", map[string]string{"table": tableName})
-		p.reportWriteSuccess(len(rawRows), "batch")
-		p.reportHeartbeat(len(rawRows), "batch")
-		return nil
+	if err := p.connectorWrite(sqlWritePayload{SQL: query}); err != nil {
+		// A transport error can follow a successful database commit.
+		p.reportWriteFailure(err, "batch")
+		return tdengineSinkRetryable(err)
 	}
-
-	return p.fallbackRowByRow(tableName, rows)
+	p.ctx.Metrics().IncCounter("tdengine_sink.inserts", map[string]string{"table": tableName})
+	p.reportWriteSuccess(len(rawRows), "batch")
+	p.reportHeartbeat(len(rawRows), "batch")
+	return nil
 }
 
-func (p *TDengineSink) fallbackRowByRow(tableName string, rows []queuedRow) error {
+func (p *TDengineSink) writeChildRows(tableName string, rows []queuedRow) error {
 	var failed int
 	var firstErr error
 	for _, r := range rows {
@@ -207,7 +214,7 @@ func (p *TDengineSink) fallbackRowByRow(tableName string, rows []queuedRow) erro
 	if failed == 0 {
 		return nil
 	}
-	return sdk.SkippableError(fmt.Errorf("tdengine batch fallback still failed for %d row(s): %w", failed, firstErr))
+	return sdk.SkippableError(fmt.Errorf("tdengine child table write failed for %d row(s): %w", failed, firstErr))
 }
 
 func (p *TDengineSink) watchResourceEvents() {

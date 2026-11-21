@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,21 +11,30 @@ import (
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
 )
 
+// sqlArgs retains JSON numeric text through database/sql's parameter conversion.
+type sqlArgs []any
+
+func (args *sqlArgs) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode((*[]any)(args))
+}
+
 type sqlReadPayload struct {
-	SQL     string `json:"sql"`
-	Args    []any  `json:"args"`
-	MaxRows int    `json:"max_rows"`
+	SQL     string  `json:"sql"`
+	Args    sqlArgs `json:"args"`
+	MaxRows int     `json:"max_rows"`
 }
 
 type sqlWritePayload struct {
 	SQL        string              `json:"sql"`
-	Args       []any               `json:"args"`
+	Args       sqlArgs             `json:"args"`
 	Statements []sqlWriteStatement `json:"statements"`
 }
 
 type sqlWriteStatement struct {
-	SQL  string `json:"sql"`
-	Args []any  `json:"args"`
+	SQL  string  `json:"sql"`
+	Args sqlArgs `json:"args"`
 }
 
 const (

@@ -22,7 +22,7 @@ func (s *RedisSink) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "sink-redis",
 		Name:        "Redis Sink",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Type:        sdk.PluginTypeSink,
 		Description: "Write events to Redis Stream or Redis Hash through connector_ref",
 		Category:    "redis",

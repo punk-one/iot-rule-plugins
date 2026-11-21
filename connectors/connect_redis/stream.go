@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -20,8 +21,10 @@ type redisStreamSession struct {
 	count          int64
 	blockTimeoutMS int
 
+	receiveMu        sync.Mutex
 	mu               sync.Mutex
 	availableCredits int
+	retainedBytes    int
 	maxBuffered      int
 	overflowPolicy   string
 	ackTimeout       time.Duration
@@ -63,11 +66,11 @@ func newRedisStreamSession(id string, payload redisReadPayload, req sdk.StreamOp
 		cursor:           payload.StartID,
 		count:            payload.Count,
 		blockTimeoutMS:   payload.BlockTimeoutMS,
-		availableCredits: credits,
-		maxBuffered:      maxBuffered,
+		availableCredits: min(credits, maxBuffered, maxRedisBufferedMessages),
+		maxBuffered:      min(maxBuffered, maxRedisBufferedMessages),
 		overflowPolicy:   normalizeRedisOverflowPolicy(req.OverflowPolicy),
 		ackTimeout:       time.Duration(ackTimeout) * time.Millisecond,
-		maxDeliverBatch:  maxDeliverBatch,
+		maxDeliverBatch:  min(maxDeliverBatch, maxRedisStreamReadCount),
 		pending:          make(map[string]sdk.StreamMessage),
 	}
 }
@@ -78,7 +81,8 @@ func (s *redisStreamSession) reserveCredits(limit int) int {
 	if s.closed || s.availableCredits <= 0 {
 		return 0
 	}
-	if s.shouldPauseFetchLocked() {
+	free := s.maxBuffered - len(s.pending) - len(s.requeue)
+	if free <= 0 || s.retainedBytes >= maxRedisResultBytes {
 		return 0
 	}
 	if limit <= 0 || limit > s.availableCredits {
@@ -90,7 +94,7 @@ func (s *redisStreamSession) reserveCredits(limit int) int {
 	if s.count > 0 && int64(limit) > s.count {
 		limit = int(s.count)
 	}
-	return limit
+	return min(limit, free)
 }
 
 func (s *redisStreamSession) dequeueRequeued(limit int) []sdk.StreamMessage {
@@ -111,31 +115,50 @@ func (s *redisStreamSession) dequeueRequeued(limit int) []sdk.StreamMessage {
 	out := append([]sdk.StreamMessage(nil), s.requeue[:limit]...)
 	s.requeue = append([]sdk.StreamMessage(nil), s.requeue[limit:]...)
 	s.availableCredits -= limit
-	for _, message := range out {
+	for i, message := range out {
 		s.pending[message.DeliveryID] = message
+		out[i] = cloneRedisStreamMessage(message)
 	}
 	return out
 }
 
-func (s *redisStreamSession) recordFetched(messages []sdk.StreamMessage) {
+func (s *redisStreamSession) recordFetched(messages []sdk.StreamMessage) ([]sdk.StreamMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(messages) > s.availableCredits {
-		messages = messages[:s.availableCredits]
+	if s.closed {
+		return nil, fmt.Errorf("Redis stream is closed")
 	}
-	s.availableCredits -= len(messages)
-	for _, message := range messages {
-		s.pending[message.DeliveryID] = message
+	for i, message := range messages {
+		if len(message.RawPayload) > maxRedisResultBytes {
+			if i == 0 {
+				return nil, fmt.Errorf("Redis stream message exceeds %d bytes", maxRedisResultBytes)
+			}
+			return messages[:i], nil
+		}
+		if s.retainedBytes+len(message.RawPayload) > maxRedisResultBytes {
+			return messages[:i], nil
+		}
+		s.pending[message.DeliveryID] = cloneRedisStreamMessage(message)
+		s.retainedBytes += len(message.RawPayload)
 		s.cursor = message.Key
+		s.availableCredits--
 	}
+	return messages, nil
+}
+
+func cloneRedisStreamMessage(message sdk.StreamMessage) sdk.StreamMessage {
+	message.RawPayload = append([]byte(nil), message.RawPayload...)
+	message.Metadata = maps.Clone(message.Metadata)
+	return message
 }
 
 func (s *redisStreamSession) ack(deliveryID string, credits int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.pending, deliveryID)
-	if credits > 0 {
-		s.availableCredits += credits
+	if message, ok := s.pending[deliveryID]; ok {
+		delete(s.pending, deliveryID)
+		s.retainedBytes -= len(message.RawPayload)
+		s.addCreditsLocked(credits)
 	}
 }
 
@@ -143,14 +166,15 @@ func (s *redisStreamSession) nack(deliveryID string, requeue bool, credits int) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	message, ok := s.pending[deliveryID]
-	if ok {
-		delete(s.pending, deliveryID)
+	if !ok {
+		return
 	}
-	if credits > 0 {
-		s.availableCredits += credits
-	}
-	if requeue && ok {
+	delete(s.pending, deliveryID)
+	s.addCreditsLocked(credits)
+	if requeue {
 		s.requeue = append([]sdk.StreamMessage{message}, s.requeue...)
+	} else {
+		s.retainedBytes -= len(message.RawPayload)
 	}
 }
 
@@ -160,17 +184,19 @@ func (s *redisStreamSession) grantCredits(credits int) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.availableCredits += credits
+	s.addCreditsLocked(credits)
+}
+
+func (s *redisStreamSession) addCreditsLocked(credits int) {
+	if credits > 0 && !s.closed {
+		s.availableCredits = min(s.maxBuffered, s.availableCredits+min(credits, s.maxBuffered))
+	}
 }
 
 func (s *redisStreamSession) close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-}
-
-func (s *redisStreamSession) shouldPauseFetchLocked() bool {
-	return s.overflowPolicy == "pause_fetch" && s.maxBuffered > 0 && len(s.requeue)+len(s.pending) >= s.maxBuffered
 }
 
 func normalizeRedisOverflowPolicy(policy string) string {
@@ -194,6 +220,9 @@ func (c *redisConnector) openReadStream(resource *redisResource, req sdk.StreamO
 	if payload.Stream == "" {
 		return sdk.StreamOpenResponse{}, fmt.Errorf("stream.stream is required")
 	}
+	if err := normalizeRedisReadLimits(&payload); err != nil {
+		return sdk.StreamOpenResponse{}, err
+	}
 	sessionID := stringsTrim(req.SessionKey)
 	if sessionID == "" {
 		sessionID = resource.resource.ID + ":" + payload.Stream
@@ -201,16 +230,24 @@ func (c *redisConnector) openReadStream(resource *redisResource, req sdk.StreamO
 	session := newRedisStreamSession(sessionID, payload, req)
 
 	resource.mu.Lock()
+	if resource.closed {
+		resource.mu.Unlock()
+		return sdk.StreamOpenResponse{}, fmt.Errorf("Redis resource is closed")
+	}
 	if current, ok := resource.sessions[sessionID]; ok {
 		current.close()
+	} else if len(resource.sessions) >= maxRedisStreamSessions {
+		resource.mu.Unlock()
+		return sdk.StreamOpenResponse{}, fmt.Errorf("Redis resource reached the stream session limit")
 	}
+	initialCredits := session.availableCredits
 	resource.sessions[sessionID] = session
 	resource.mu.Unlock()
 
 	return sdk.StreamOpenResponse{
 		StreamID:          sessionID,
 		DeliverySemantics: sdk.StreamDeliveryAtLeastOnce,
-		InitialCredits:    req.InitialCredits,
+		InitialCredits:    initialCredits,
 	}, nil
 }
 
@@ -219,6 +256,8 @@ func (c *redisConnector) receiveReadStream(resource *redisResource, req sdk.Stre
 	if err != nil {
 		return sdk.StreamReceiveResponse{}, err
 	}
+	session.receiveMu.Lock()
+	defer session.receiveMu.Unlock()
 	if requeued := session.dequeueRequeued(req.MaxMessages); len(requeued) > 0 {
 		return sdk.StreamReceiveResponse{Messages: requeued}, nil
 	}
@@ -233,7 +272,7 @@ func (c *redisConnector) receiveReadStream(resource *redisResource, req sdk.Stre
 		return sdk.StreamReceiveResponse{}, err
 	}
 
-	blockTimeout := time.Duration(req.WaitTimeoutMS) * time.Millisecond
+	blockTimeout := time.Duration(min(req.WaitTimeoutMS, maxRedisReadWaitMS)) * time.Millisecond
 	if blockTimeout <= 0 {
 		blockTimeout = time.Duration(session.blockTimeoutMS) * time.Millisecond
 	}
@@ -253,17 +292,32 @@ func (c *redisConnector) receiveReadStream(resource *redisResource, req sdk.Stre
 	}
 
 	messages := make([]sdk.StreamMessage, 0, limit)
+	bytes := 0
+readBatch:
 	for _, stream := range streams {
 		for _, message := range stream.Messages {
+			if len(messages) >= limit {
+				return sdk.StreamReceiveResponse{}, fmt.Errorf("Redis stream returned more than %d messages", limit)
+			}
 			streamMessage, err := buildRedisStreamMessage(stream.Stream, message)
 			if err != nil {
 				return sdk.StreamReceiveResponse{}, err
 			}
+			if bytes+len(streamMessage.RawPayload) > maxRedisResultBytes {
+				if len(messages) == 0 {
+					return sdk.StreamReceiveResponse{}, fmt.Errorf("Redis stream message exceeds %d bytes", maxRedisResultBytes)
+				}
+				break readBatch
+			}
+			bytes += len(streamMessage.RawPayload)
 			messages = append(messages, streamMessage)
 		}
 	}
-	session.recordFetched(messages)
-	return sdk.StreamReceiveResponse{Messages: messages}, nil
+	accepted, err := session.recordFetched(messages)
+	if err != nil {
+		return sdk.StreamReceiveResponse{}, err
+	}
+	return sdk.StreamReceiveResponse{Messages: accepted}, nil
 }
 
 func (c *redisConnector) ackReadStream(resource *redisResource, req sdk.StreamAckRequest) error {

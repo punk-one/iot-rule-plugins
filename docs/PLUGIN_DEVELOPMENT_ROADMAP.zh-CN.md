@@ -2,6 +2,9 @@
 
 日期：2026-11-14。本文保留原规划。2026-11-15 用户确认本次包括 M0–M5 全部列出的能力，覆盖下文原有“按需求/可选”的阶段排除；当前实现与生产边界见 [交付台账](PLUGIN_DEVELOPMENT_STATUS.zh-CN.md) 和 [验证记录](DEVELOPMENT_VERIFICATION_2026-11-14.zh-CN.md)。
 
+
+本轮按 N01–N24 逐项核对后的能力和边界见 [Node-RED 参考能力复核](NODE_RED_COVERAGE.zh-CN.md)。
+
 ## 1. 决策摘要
 
 优先顺序建议为：**现有插件可靠性与统一点表 → Modbus → Mitsubishi MC → OPC UA → HTTP 与 SQL Server → 自由口与文件采集 → FANUC → 行业扩展**。同时补充可视化条件路由、校验、限流和窗口聚合，减少用户必须编写 JavaScript 的场景。

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"hash/crc32"
+	"math"
 
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
 )
@@ -23,6 +25,11 @@ func (p *ChangeDetectPlugin) OnEvent(event sdk.Event) error {
 	}
 
 	stateKey := p.stateMgr.GenerateKey(keyValues)
+	// A key must be compared and advanced as one operation. Striping keeps
+	// unrelated streams from waiting on the same state handoff by default.
+	lock := &p.stateLocks[crc32.ChecksumIEEE([]byte(stateKey))%uint32(len(p.stateLocks))]
+	lock.Lock()
+	defer lock.Unlock()
 
 	var state ChangeState
 	if err := p.stateMgr.GetState(stateKey, &state); err != nil {
@@ -58,23 +65,26 @@ func (p *ChangeDetectPlugin) OnEvent(event sdk.Event) error {
 			return nil
 		}
 
-		newValue := toFloat(fieldValue)
+		newValue, valid := numericSample(fieldValue)
+		if !valid {
+			p.ctx.Logger().Warn("Change detection skipped a nonnumeric or nonfinite sample", sdk.Field{Key: "field", Value: p.cfg.Process.Detect.Field})
+			return nil
+		}
 		var numericChangeValue float64
 		matched, numericChangeValue, shouldEmit = detectChange(&state, newValue, p.cfg)
+		if math.IsNaN(numericChangeValue) || math.IsInf(numericChangeValue, 0) {
+			p.ctx.Logger().Warn("Change detection skipped a nonfinite difference", sdk.Field{Key: "field", Value: p.cfg.Process.Detect.Field})
+			return nil
+		}
 		changeValue = numericChangeValue
-		updateNumericState(&state, newValue)
-	}
-
-	if err := p.saveState(stateKey, &state); err != nil {
-		p.ctx.Logger().Error("Failed to save state", sdk.Field{Key: "error", Value: err.Error()})
-		p.reportStateFailure(err)
+		updateNumericState(&state, newValue, matched, p.cfg)
 	}
 
 	if shouldEmit {
-		outputPayload := make(map[string]interface{}, len(event.Payload)+3)
-		for key, value := range event.Payload {
-			outputPayload[key] = value
-		}
+		outputEvent := event.Clone()
+		outputEvent.RuleID = p.ctx.RuleID()
+		outputEvent.Source = p.ctx.NodeID()
+		outputPayload := outputEvent.Payload
 		if p.cfg.annotateEnabled() {
 			outputPayload["_change_detected"] = matched
 			outputPayload["_change_value"] = changeValue
@@ -82,15 +92,6 @@ func (p *ChangeDetectPlugin) OnEvent(event sdk.Event) error {
 			if p.cfg.Process.Detect.Type == string(ModeChanged) {
 				outputPayload["_change_fields"] = changedFields
 			}
-		}
-
-		outputEvent := sdk.Event{
-			ID:        event.ID,
-			Timestamp: event.Timestamp,
-			Payload:   outputPayload,
-			Metadata:  event.Metadata,
-			RuleID:    p.ctx.RuleID(),
-			Source:    p.ctx.NodeID(),
 		}
 
 		if err := p.ctx.Emitter().Publish(outputEvent); err != nil {
@@ -111,6 +112,12 @@ func (p *ChangeDetectPlugin) OnEvent(event sdk.Event) error {
 		p.ctx.Logger().Debug("ChangeDetect: no change detected, skipping emit")
 	}
 
+	// Advance the reference only after any required handoff succeeds. A
+	// retryable publish failure must not suppress the next delivery attempt.
+	if err := p.saveState(stateKey, &state); err != nil {
+		p.ctx.Logger().Error("Failed to save state", sdk.Field{Key: "error", Value: err.Error()})
+		p.reportStateFailure(err)
+	}
 	p.reportHeartbeat()
 	return nil
 }

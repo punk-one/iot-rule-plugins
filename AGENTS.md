@@ -74,5 +74,6 @@ go vet .
 git diff --check
 ```
 
-Keep English as the default `README.md`, Chinese in `README.zh-CN.md`, and update plugin-specific README or
+Keep Chinese as the default `README.md`, English in `README.en.md`, and `README.zh-CN.md` as a compatibility
+link. Update plugin-specific README or
 architecture documents when configuration or lifecycle behavior changes.

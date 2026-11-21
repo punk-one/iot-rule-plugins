@@ -13,6 +13,7 @@ import (
 
 type tdengineConnector struct {
 	mu        sync.Mutex
+	closed    bool
 	resources map[string]*tdengineResource
 }
 
@@ -32,7 +33,7 @@ func (c *tdengineConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-tdengine",
 		Name:        "Connector TDengine",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared TDengine 3.0 connector for sink plugins",
 		Category:    "connector",
@@ -55,33 +56,30 @@ func (c *tdengineConnector) CreateResource(resource sdk.ConnectorResource) (stri
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if current, ok := c.resources[resource.ID]; ok {
-		if current.db != nil {
-			_ = current.db.Close()
-		}
+	if c.closed {
+		c.mu.Unlock()
+		return "", fmt.Errorf("connector stopped")
 	}
-	c.resources[resource.ID] = &tdengineResource{
-		resource: resource,
-		cfg:      cfg,
-	}
+	previous := c.resources[resource.ID]
+	c.resources[resource.ID] = &tdengineResource{resource: resource, cfg: cfg}
+	c.mu.Unlock()
+	closeResourcePool(previous)
 	return resource.ID, nil
 }
 
 func (c *tdengineConnector) DestroyResource(providerHandle string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	resource := c.resources[providerHandle]
+	delete(c.resources, providerHandle)
+	c.mu.Unlock()
+	closeResourcePool(resource)
+	return nil
+}
 
-	resource, ok := c.resources[providerHandle]
-	if !ok {
-		return nil
-	}
-	if resource.db != nil {
+func closeResourcePool(resource *tdengineResource) {
+	if resource != nil && resource.db != nil {
 		_ = resource.db.Close()
 	}
-	delete(c.resources, providerHandle)
-	return nil
 }
 
 func (c *tdengineConnector) Execute(providerHandle string, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
@@ -136,13 +134,12 @@ func (c *tdengineConnector) Probe(providerHandle string, req sdk.ConnectorReques
 
 func (c *tdengineConnector) Stop() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for id, resource := range c.resources {
-		if resource.db != nil {
-			_ = resource.db.Close()
-		}
-		delete(c.resources, id)
+	c.closed = true
+	resources := c.resources
+	c.resources = make(map[string]*tdengineResource)
+	c.mu.Unlock()
+	for _, resource := range resources {
+		closeResourcePool(resource)
 	}
 	return nil
 }
@@ -162,6 +159,9 @@ func (c *tdengineConnector) openDB(resource *tdengineResource) (*sql.DB, error) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.resources[resource.resource.ID] != resource {
+		return nil, fmt.Errorf("database resource retired")
+	}
 	if resource.db != nil {
 		return resource.db, nil
 	}

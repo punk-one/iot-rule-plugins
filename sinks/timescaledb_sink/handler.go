@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,10 @@ func (p *TimescaleSink) buildRowData(e sdk.Event) (string, map[string]interface{
 		return tableName, nil, nil
 	}
 
+	if !validSQLTableName(tableName) {
+		return "", nil, sdk.SkippableError(errors.New("invalid SQL table name"))
+	}
+
 	row := make(map[string]interface{}, len(e.Payload))
 	for key, value := range e.Payload {
 		normalized, err := normalizeColumnValue(value)
@@ -46,6 +51,9 @@ func (p *TimescaleSink) buildRowData(e sdk.Event) (string, map[string]interface{
 			return tableName, nil, sdk.SkippableError(fmt.Errorf("normalize payload field %q: %w", key, err))
 		}
 		row[key] = normalized
+	}
+	if err := validateSQLColumns(row); err != nil {
+		return tableName, nil, sdk.SkippableError(err)
 	}
 	return tableName, row, nil
 }
@@ -129,12 +137,13 @@ func (p *TimescaleSink) flushAllBuffered() error {
 	p.pendingBytes = make(map[string]int)
 	p.bufferMu.Unlock()
 
+	var failures []error
 	for tableName, rows := range pendingRows {
 		if err := p.flushRows(tableName, rows); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (p *TimescaleSink) flushRows(tableName string, rows []map[string]interface{}) error {
@@ -166,31 +175,15 @@ func (p *TimescaleSink) flushRows(tableName string, rows []map[string]interface{
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s",
 		tableName, strings.Join(columnNames, ", "), strings.Join(placeholderGroups, ", "))
-	if err := p.connectorWrite(sqlWritePayload{SQL: query, Args: args}); err == nil {
-		p.ctx.Metrics().IncCounter("timescaledb_sink.inserts", map[string]string{"table": tableName})
-		p.reportWriteSuccess(len(rows), "batch")
-		p.reportHeartbeat(len(rows), "batch")
-		return nil
+	if err := p.connectorWrite(sqlWritePayload{SQL: query, Args: args}); err != nil {
+		// A transport error can follow a successful database commit.
+		p.reportWriteFailure(err, "batch")
+		return timescaleSinkRetryable(err)
 	}
-
-	return p.fallbackRowByRow(tableName, rows)
-}
-
-func (p *TimescaleSink) fallbackRowByRow(tableName string, rows []map[string]interface{}) error {
-	var failed int
-	var firstErr error
-	for _, row := range rows {
-		if err := p.writeSingleRow(tableName, row); err != nil {
-			failed++
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-	if failed == 0 {
-		return nil
-	}
-	return sdk.SkippableError(fmt.Errorf("timescaledb batch fallback still failed for %d row(s): %w", failed, firstErr))
+	p.ctx.Metrics().IncCounter("timescaledb_sink.inserts", map[string]string{"table": tableName})
+	p.reportWriteSuccess(len(rows), "batch")
+	p.reportHeartbeat(len(rows), "batch")
+	return nil
 }
 
 func (p *TimescaleSink) watchResourceEvents() {

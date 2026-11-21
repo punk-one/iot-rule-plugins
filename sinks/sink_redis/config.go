@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -31,6 +32,7 @@ type RedisSinkConfig struct {
 		WriteTimeoutSec int   `json:"write_timeout_sec,omitempty"`
 		MaxLen          int64 `json:"max_len,omitempty"`
 		Approx          bool  `json:"approx,omitempty"`
+		TTLSeconds      int64 `json:"ttl_seconds,omitempty"`
 	} `json:"options,omitempty"`
 }
 
@@ -154,6 +156,14 @@ const redisSinkConfigSchema = `{
 					"minimum": 0,
 					"default": 0
 				},
+				"ttl_seconds": {
+					"type": "integer",
+					"title": "Hash TTL (sec)",
+					"description": "Hash mode only. Positive values renew the Redis key expiration on each successful write; zero leaves its TTL unchanged.",
+					"minimum": 0,
+					"maximum": 9223372036,
+					"default": 0
+				},
 				"approx": {
 					"type": "boolean",
 					"title": "Approximate Trimming",
@@ -201,8 +211,15 @@ func (s *RedisSink) validateConfig(raw []byte) error {
 	if hasRawSectionField(raw, "encode", "payload_field") {
 		return fmt.Errorf("encode.payload_field is no longer supported; stream mode always writes to payload")
 	}
+	const maxTTL = int64(1<<63-1) / int64(time.Second)
+	if s.cfg.Options.TTLSeconds < 0 || s.cfg.Options.TTLSeconds > maxTTL {
+		return fmt.Errorf("options.ttl_seconds is outside the supported range")
+	}
 	switch s.cfg.Target.Mode {
 	case "stream":
+		if s.cfg.Options.TTLSeconds != 0 {
+			return fmt.Errorf("options.ttl_seconds is only supported in hash mode")
+		}
 		if s.cfg.Target.Stream == "" {
 			return fmt.Errorf("target.stream is required when target.mode=stream")
 		}

@@ -13,6 +13,7 @@ import (
 
 type timescaledbConnector struct {
 	mu        sync.Mutex
+	closed    bool
 	resources map[string]*timescaledbResource
 }
 
@@ -32,7 +33,7 @@ func (c *timescaledbConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-timescaledb",
 		Name:        "Connector TimescaleDB",
-		Version:     "1.0.1",
+		Version:     "1.0.2",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared TimescaleDB/PostgreSQL connector for source and sink plugins",
 		Category:    "connector",
@@ -55,33 +56,30 @@ func (c *timescaledbConnector) CreateResource(resource sdk.ConnectorResource) (s
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if current, ok := c.resources[resource.ID]; ok {
-		if current.db != nil {
-			_ = current.db.Close()
-		}
+	if c.closed {
+		c.mu.Unlock()
+		return "", fmt.Errorf("connector stopped")
 	}
-	c.resources[resource.ID] = &timescaledbResource{
-		resource: resource,
-		cfg:      cfg,
-	}
+	previous := c.resources[resource.ID]
+	c.resources[resource.ID] = &timescaledbResource{resource: resource, cfg: cfg}
+	c.mu.Unlock()
+	closeResourcePool(previous)
 	return resource.ID, nil
 }
 
 func (c *timescaledbConnector) DestroyResource(providerHandle string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	resource := c.resources[providerHandle]
+	delete(c.resources, providerHandle)
+	c.mu.Unlock()
+	closeResourcePool(resource)
+	return nil
+}
 
-	resource, ok := c.resources[providerHandle]
-	if !ok {
-		return nil
-	}
-	if resource.db != nil {
+func closeResourcePool(resource *timescaledbResource) {
+	if resource != nil && resource.db != nil {
 		_ = resource.db.Close()
 	}
-	delete(c.resources, providerHandle)
-	return nil
 }
 
 func (c *timescaledbConnector) Execute(providerHandle string, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
@@ -136,13 +134,12 @@ func (c *timescaledbConnector) Probe(providerHandle string, req sdk.ConnectorReq
 
 func (c *timescaledbConnector) Stop() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for id, resource := range c.resources {
-		if resource.db != nil {
-			_ = resource.db.Close()
-		}
-		delete(c.resources, id)
+	c.closed = true
+	resources := c.resources
+	c.resources = make(map[string]*timescaledbResource)
+	c.mu.Unlock()
+	for _, resource := range resources {
+		closeResourcePool(resource)
 	}
 	return nil
 }
@@ -162,6 +159,9 @@ func (c *timescaledbConnector) openDB(resource *timescaledbResource) (*sql.DB, e
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.resources[resource.resource.ID] != resource {
+		return nil, fmt.Errorf("database resource retired")
+	}
 	if resource.db != nil {
 		return resource.db, nil
 	}

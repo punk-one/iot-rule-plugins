@@ -71,6 +71,9 @@ func (p *PostgresSink) ensureColumnsForRows(tableName string, rows []map[string]
 		return nil
 	}
 
+	p.columnsMu.Lock()
+	defer p.columnsMu.Unlock()
+
 	tableColumns, err := p.getTableColumns(tableName)
 	if err != nil {
 		return fmt.Errorf("failed to load table columns: %w", err)

@@ -42,6 +42,9 @@ type mqttResource struct {
 }
 
 type mqttBinding struct {
+	mu     sync.Mutex
+	done   chan struct{}
+	closed bool
 	topics map[string]struct{}
 	inbox  chan mqttInboundMessage
 }
@@ -73,7 +76,7 @@ func (c *mqttConnector) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "connect-mqtt",
 		Name:        "Connector MQTT",
-		Version:     "1.0.3",
+		Version:     "1.0.4",
 		Type:        sdk.PluginTypeConnector,
 		Description: "Shared MQTT connector for source and sink plugins",
 		Category:    "connector",
@@ -247,15 +250,7 @@ func closeMQTTResource(resource *mqttResource) {
 		resource.release(inboundCost(message))
 	}
 	for _, binding := range bindings {
-		for {
-			select {
-			case message := <-binding.inbox:
-				resource.release(inboundCost(message))
-			default:
-				goto drained
-			}
-		}
-	drained:
+		resource.closeBinding(binding)
 	}
 	for _, session := range sessions {
 		session.close()

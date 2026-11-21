@@ -7,36 +7,29 @@ import (
 	"time"
 )
 
-// toFloat 转换为 float64
-func toFloat(v interface{}) float64 {
-	switch t := v.(type) {
-	case int:
-		return float64(t)
-	case int8:
-		return float64(t)
-	case int16:
-		return float64(t)
-	case int32:
-		return float64(t)
-	case int64:
-		return float64(t)
-	case uint:
-		return float64(t)
-	case uint8:
-		return float64(t)
-	case uint16:
-		return float64(t)
-	case uint32:
-		return float64(t)
-	case uint64:
-		return float64(t)
-	case float32:
-		return float64(t)
-	case float64:
-		return t
-	default:
-		return 0
+// numericSample accepts finite numeric data without treating strings or booleans as zero.
+func numericSample(value any) (float64, bool) {
+	var sample float64
+	if number, ok := value.(json.Number); ok {
+		parsed, err := number.Float64()
+		if err != nil {
+			return 0, false
+		}
+		sample = parsed
+	} else {
+		number := reflect.ValueOf(value)
+		switch number.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			sample = float64(number.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			sample = float64(number.Uint())
+		case reflect.Float32, reflect.Float64:
+			sample = number.Float()
+		default:
+			return 0, false
+		}
 	}
+	return sample, !math.IsNaN(sample) && !math.IsInf(sample, 0)
 }
 
 // detectChange 检测变化（v1.5）
@@ -124,9 +117,10 @@ func detectFieldChanges(state *ChangeState, newValues map[string]interface{}, cf
 	return matched, changeCount, changedFields, shouldEmit
 }
 
-// updateNumericState 更新数值检测状态
-func updateNumericState(state *ChangeState, newValue float64) {
-	state.LastValue = newValue
+func updateNumericState(state *ChangeState, newValue float64, matched bool, cfg Config) {
+	if state.LastTs.IsZero() || matched || cfg.Process.Detect.Baseline != baselineLastChange {
+		state.LastValue = newValue
+	}
 	state.LastTs = time.Now()
 }
 

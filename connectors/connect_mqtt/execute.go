@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	sdk "github.com/punk-one/iot-rule-plugin-sdk"
 )
 
@@ -73,6 +72,9 @@ func (c *mqttConnector) probe(resource *mqttResource, req sdk.ConnectorRequest) 
 }
 
 func (c *mqttConnector) executeRead(resource *mqttResource, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {
+	if len(req.Payload) > 65536 {
+		return sdk.ConnectorResponse{}, fmt.Errorf("MQTT legacy read request exceeds bound")
+	}
 	var payload mqttReadPayload
 	if err := json.Unmarshal(req.Payload, &payload); err != nil {
 		return sdk.ConnectorResponse{}, fmt.Errorf("parse read payload: %w", err)
@@ -84,29 +86,22 @@ func (c *mqttConnector) executeRead(resource *mqttResource, req sdk.ConnectorReq
 		return sdk.ConnectorResponse{}, fmt.Errorf("resource token is required")
 	}
 
-	client, err := c.ensureConnected(resource)
+	binding, err := c.registerLegacyBinding(resource, req.ResourceToken, payload.Topics, payload.QoS)
 	if err != nil {
 		return sdk.ConnectorResponse{}, err
 	}
-	if err := c.ensureBinding(resource, req.ResourceToken, payload.Topics, byte(payload.QoS), client); err != nil {
+	if _, err := c.ensureConnected(resource); err != nil {
 		return sdk.ConnectorResponse{}, err
 	}
-
-	resource.mu.Lock()
-	binding := resource.bindings[req.ResourceToken]
-	resource.mu.Unlock()
-	if binding == nil {
-		return sdk.ConnectorResponse{}, fmt.Errorf("binding %s not found", req.ResourceToken)
+	for _, topic := range payload.Topics {
+		c.flushOrphans(resource, topic)
 	}
-
-	timeout := time.Duration(payload.WaitTimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), mqttReceiveWait(payload.WaitTimeoutMS))
 	defer cancel()
 
 	select {
+	case <-binding.done:
+		return sdk.ConnectorResponse{}, fmt.Errorf("MQTT resource stopped")
 	case message := <-binding.inbox:
 		resource.release(inboundCost(message))
 		return buildJSONResponse(mqttReadResponse{Messages: []mqttInboundMessage{message}}, nil)
@@ -115,28 +110,36 @@ func (c *mqttConnector) executeRead(resource *mqttResource, req sdk.ConnectorReq
 	}
 }
 
-func (c *mqttConnector) ensureBinding(resource *mqttResource, token string, topics []string, qos byte, client mqtt.Client) error {
-	if token == "" || len(token) > 512 || len(topics) < 1 || len(topics) > 64 || qos > 2 {
-		return fmt.Errorf("invalid MQTT read binding")
+func (c *mqttConnector) registerLegacyBinding(resource *mqttResource, token string, topics []string, qos int) (*mqttBinding, error) {
+	if token == "" || len(token) > 512 || len(topics) < 1 || len(topics) > 64 || qos < 0 || qos > 2 {
+		return nil, fmt.Errorf("invalid MQTT read binding")
 	}
 	for _, topic := range topics {
 		if !validMQTTFilter(topic) {
-			return fmt.Errorf("invalid MQTT topic filter")
+			return nil, fmt.Errorf("invalid MQTT topic filter")
 		}
 	}
 	resource.mu.Lock()
+	defer resource.mu.Unlock()
 	if resource.closed {
-		resource.mu.Unlock()
-		return fmt.Errorf("resource closed")
+		return nil, fmt.Errorf("resource closed")
 	}
 	binding := resource.bindings[token]
 	if binding == nil {
 		if len(resource.bindings) >= 32 {
-			resource.mu.Unlock()
-			return fmt.Errorf("MQTT legacy binding capacity exceeded")
+			return nil, fmt.Errorf("MQTT legacy binding capacity exceeded")
 		}
-		binding = &mqttBinding{topics: map[string]struct{}{}, inbox: make(chan mqttInboundMessage, min(resource.cfg.QueueSize, 256))}
+		binding = &mqttBinding{topics: map[string]struct{}{}, inbox: make(chan mqttInboundMessage, min(resource.cfg.QueueSize, 256)), done: make(chan struct{})}
 		resource.bindings[token] = binding
+	}
+	newTopics := make(map[string]struct{})
+	for _, topic := range topics {
+		if _, exists := binding.topics[topic]; !exists {
+			newTopics[topic] = struct{}{}
+		}
+	}
+	if len(binding.topics)+len(newTopics) > 64 {
+		return nil, fmt.Errorf("MQTT legacy binding topic capacity exceeded")
 	}
 	for _, topic := range topics {
 		binding.topics[topic] = struct{}{}
@@ -145,17 +148,10 @@ func (c *mqttConnector) ensureBinding(resource *mqttResource, token string, topi
 			state = &mqttSubscription{tokens: map[string]struct{}{}, sessions: map[string]struct{}{}}
 			resource.subscriptions[topic] = state
 		}
-		state.qos = max(state.qos, qos)
+		state.qos = max(state.qos, byte(qos))
 		state.tokens[token] = struct{}{}
 	}
-	resource.mu.Unlock()
-	if err := c.resubscribeAll(resource, client); err != nil {
-		return err
-	}
-	for _, topic := range topics {
-		c.flushOrphans(resource, topic)
-	}
-	return nil
+	return binding, nil
 }
 
 func (c *mqttConnector) executeWrite(resource *mqttResource, req sdk.ConnectorRequest) (sdk.ConnectorResponse, error) {

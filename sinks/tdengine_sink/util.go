@@ -71,6 +71,9 @@ func (p *TDengineSink) ensureColumnsForRows(tableName string, rows []map[string]
 		return nil
 	}
 
+	p.columnsMu.Lock()
+	defer p.columnsMu.Unlock()
+
 	tableColumns, err := p.getTableColumns(tableName)
 	if err != nil {
 		return fmt.Errorf("failed to load table columns: %w", err)
@@ -218,9 +221,9 @@ func formatSQLValue(v interface{}) string {
 		return "false"
 	case jsonColumnValue:
 		s := string(val)
-		return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
+		return quoteSQLString(s)
 	case string:
-		return "'" + strings.ReplaceAll(val, "'", "\\'") + "'"
+		return quoteSQLString(val)
 	case time.Time:
 		return "'" + val.Format("2006-01-02 15:04:05.000") + "'"
 	case float64:
@@ -231,8 +234,14 @@ func formatSQLValue(v interface{}) string {
 		return fmt.Sprintf("%v", val)
 	default:
 		s := fmt.Sprintf("%v", val)
-		return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
+		return quoteSQLString(s)
 	}
+}
+
+var tdengineStringEscapes = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+
+func quoteSQLString(value string) string {
+	return "'" + tdengineStringEscapes.Replace(value) + "'"
 }
 
 func estimateRowSize(row map[string]interface{}) int {

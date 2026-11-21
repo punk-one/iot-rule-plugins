@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strconv"
@@ -31,6 +32,22 @@ const transformMapConfigSchema = `{
         "iterate": {
           "type": "string",
           "description": "Optional path to an array or object to iterate. Each element produces one output event and is exposed to templates as .item/.value, for example payload.data.metrics"
+        },
+        "operations": {
+          "type": "array",
+          "maxItems": 128,
+          "description": "Ordered payload edits. Without template/expand, edit a copy of the input payload; otherwise edit the mapped result.",
+          "items": {
+            "type": "object",
+            "required": ["op", "path"],
+            "properties": {
+              "op": {"type": "string", "enum": ["set", "move", "delete"]},
+              "path": {"type": "string", "minLength": 1, "maxLength": 256},
+              "from": {"type": "string", "minLength": 1, "maxLength": 256},
+              "value": {}
+            },
+            "additionalProperties": false
+          }
         },
         "expand": {
           "type": "array",
@@ -65,9 +82,10 @@ const transformMapConfigSchema = `{
 
 type Config struct {
 	Process struct {
-		Template interface{}  `json:"template,omitempty"`
-		Iterate  string       `json:"iterate,omitempty"`
-		Expand   []ExpandRule `json:"expand,omitempty"`
+		Template   interface{}      `json:"template,omitempty"`
+		Iterate    string           `json:"iterate,omitempty"`
+		Expand     []ExpandRule     `json:"expand,omitempty"`
+		Operations []fieldOperation `json:"operations,omitempty"`
 	} `json:"process"`
 }
 
@@ -146,8 +164,8 @@ func (p *TransformMapPlugin) Info() sdk.PluginInfo {
 	return sdk.PluginInfo{
 		ID:          "transform-map",
 		Name:        "Transform Map",
-		Version:     "1.0.1",
-		Description: "Render row payloads with Go templates and optional field expansion",
+		Version:     "1.0.2",
+		Description: "Render payloads with Go templates, expand fields or apply ordered payload edits",
 		Type:        sdk.PluginTypeProcessor,
 		Category:    "transform",
 		Capabilities: sdk.PluginCapabilities{
@@ -161,35 +179,42 @@ func (p *TransformMapPlugin) Info() sdk.PluginInfo {
 }
 
 func (p *TransformMapPlugin) Init(cfg sdk.PluginConfig) error {
-	if err := json.Unmarshal(cfg.Raw, &p.cfg); err != nil {
+	var config Config
+	if err := json.Unmarshal(cfg.Raw, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	p.cfg.Process.Iterate = strings.TrimSpace(p.cfg.Process.Iterate)
-	for idx := range p.cfg.Process.Expand {
-		p.cfg.Process.Expand[idx].From = strings.TrimSpace(p.cfg.Process.Expand[idx].From)
-		p.cfg.Process.Expand[idx].To = strings.TrimSpace(p.cfg.Process.Expand[idx].To)
-		if p.cfg.Process.Expand[idx].From == "" {
+	config.Process.Iterate = strings.TrimSpace(config.Process.Iterate)
+	for idx := range config.Process.Expand {
+		config.Process.Expand[idx].From = strings.TrimSpace(config.Process.Expand[idx].From)
+		config.Process.Expand[idx].To = strings.TrimSpace(config.Process.Expand[idx].To)
+		if config.Process.Expand[idx].From == "" {
 			return fmt.Errorf("process.expand[%d].from is required", idx)
 		}
 	}
 
-	if p.cfg.Process.Template == nil && len(p.cfg.Process.Expand) == 0 {
-		return fmt.Errorf("process.template or process.expand is required")
+	if config.Process.Template == nil && len(config.Process.Expand) == 0 && len(config.Process.Operations) == 0 {
+		return fmt.Errorf("process.template, process.expand or process.operations is required")
 	}
 
-	if p.cfg.Process.Template != nil {
-		templateSpec, err := normalizeTemplateSpec(p.cfg.Process.Template)
+	if err := compileOperations(config.Process.Operations); err != nil {
+		return err
+	}
+
+	var renderer valueRenderer
+	if config.Process.Template != nil {
+		templateSpec, err := normalizeTemplateSpec(config.Process.Template)
 		if err != nil {
 			return err
 		}
-		renderer, err := compileRenderer(templateSpec)
+		renderer, err = compileRenderer(templateSpec)
 		if err != nil {
 			return err
 		}
-		p.renderer = renderer
 	}
 
+	p.cfg = config
+	p.renderer = renderer
 	return nil
 }
 
@@ -222,6 +247,7 @@ func (p *TransformMapPlugin) OnEvent(e sdk.Event) error {
 		}
 
 		out := e
+		out.Metadata = maps.Clone(e.Metadata)
 		out.Payload = payload
 		out.RuleID = p.ctx.RuleID()
 		out.Source = p.ctx.NodeID()
@@ -319,6 +345,18 @@ func (p *TransformMapPlugin) renderPayload(e sdk.Event, extra map[string]interfa
 		}
 	}
 
+	if len(p.cfg.Process.Operations) > 0 {
+		if p.renderer == nil && len(p.cfg.Process.Expand) == 0 {
+			if owned := e.Clone().Payload; owned != nil {
+				payload = owned
+			}
+		}
+		for index, op := range p.cfg.Process.Operations {
+			if err := op.apply(payload); err != nil {
+				return nil, fmt.Errorf("process.operations[%d]: %w", index, err)
+			}
+		}
+	}
 	return payload, nil
 }
 
